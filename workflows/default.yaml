@@ -1,0 +1,167 @@
+workflow: default
+tasks:
+  # Goal phase
+  - id: define-goal
+    name: Define Goal
+    agent: ferb-reviewer
+    prompt: analyst.md
+    status: pending
+    inputs: []
+    reviews: ~
+    approves: ~
+    max_iterations: 5
+    success_criteria:
+      - Goal description is clear and unambiguous
+      - Artifact type is explicitly specified
+      - All constraints are documented
+      - Enough detail for a planner to proceed without guessing
+
+  - id: review-goal
+    name: Review Goal
+    agent: ferb-reviewer
+    prompt: goal-reviewer.md
+    status: pending
+    inputs:
+      - define-goal
+    reviews: define-goal
+    approves: ~
+    max_iterations: 3
+    success_criteria:
+      - All success criteria for define-goal are met
+      - No ambiguities remain that would cause the planner to guess
+
+  - id: approve-goal
+    name: Approve Goal
+    agent: ferb-approver
+    status: pending
+    inputs:
+      - define-goal
+      - review-goal
+    reviews: ~
+    approves: define-goal
+    max_iterations: 0
+
+  # Plan phase
+  - id: develop-plan
+    name: Develop Plan
+    agent: ferb-worker
+    prompt: planner.md
+    status: pending
+    inputs:
+      - approve-goal
+    reviews: ~
+    approves: ~
+    max_iterations: 0
+    success_criteria:
+      - Plan has concrete ordered steps
+      - Success criteria are objectively verifiable
+      - Plan covers all constraints from goal
+
+  - id: review-plan
+    name: Review Plan
+    agent: ferb-reviewer
+    prompt: plan-reviewer.md
+    status: pending
+    inputs:
+      - develop-plan
+    reviews: develop-plan
+    approves: ~
+    max_iterations: 3
+    success_criteria:
+      - Plan is complete and unambiguous
+      - All success criteria are measurable
+      - No conflicting steps
+
+  - id: approve-plan
+    name: Approve Plan
+    agent: ferb-approver
+    status: pending
+    inputs:
+      - develop-plan
+      - review-plan
+    reviews: ~
+    approves: develop-plan
+    max_iterations: 0
+
+  # Test phase
+  - id: create-tests
+    name: Create Test Suite
+    agent: ferb-worker
+    prompt: test-planner.md
+    status: pending
+    inputs:
+      - approve-plan
+    reviews: ~
+    approves: ~
+    max_iterations: 0
+    success_criteria:
+      - Test cases are enumerated with IDs
+      - Each test case has a clear criterion and expected result
+      - Test cases cover all plan success criteria
+
+  - id: review-tests
+    name: Review Tests
+    agent: ferb-reviewer
+    prompt: test-reviewer.md
+    status: pending
+    inputs:
+      - create-tests
+    reviews: create-tests
+    approves: ~
+    max_iterations: 3
+    success_criteria:
+      - All test cases are objectively verifiable
+      - No duplicate or redundant test cases
+      - Coverage is complete
+
+  - id: approve-tests
+    name: Approve Tests
+    agent: ferb-approver
+    status: pending
+    inputs:
+      - create-tests
+      - review-tests
+    reviews: ~
+    approves: create-tests
+    max_iterations: 0
+
+  # Artifact phase
+  - id: make-artifact
+    name: Make Artifact
+    agent: ferb-worker
+    prompt: maker.md
+    status: pending
+    inputs:
+      - approve-plan
+      - approve-tests
+    reviews: ~
+    approves: ~
+    max_iterations: 0
+    success_criteria:
+      - Artifact matches all goal constraints
+      - Artifact passes all test cases
+
+  - id: review-artifact
+    name: Review Artifact
+    agent: ferb-reviewer
+    prompt: artifact-reviewer.md
+    status: pending
+    inputs:
+      - make-artifact
+    reviews: make-artifact
+    approves: ~
+    max_iterations: 3
+    success_criteria:
+      - Artifact meets all success criteria from the plan
+      - All test cases would pass against this artifact
+
+  - id: approve-artifact
+    name: Approve Artifact
+    agent: ferb-approver
+    status: pending
+    inputs:
+      - make-artifact
+      - review-artifact
+    reviews: ~
+    approves: make-artifact
+    max_iterations: 0
