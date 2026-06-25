@@ -322,7 +322,7 @@ pub async fn run_task(
     channel_id: Option<&str>,
     config: &FerbConfig,
 ) -> anyhow::Result<()> {
-    let client = TramwayClient::new(&config.tramway.url);
+    let client = TramwayClient::new(&config.tramway.url, &config.tramway.model);
     let sb = SwitchboardClient::new(&config.switchboard.url);
 
     let workflow_path =

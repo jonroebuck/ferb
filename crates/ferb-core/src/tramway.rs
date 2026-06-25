@@ -34,13 +34,11 @@ struct ChatChoiceMessage {
 }
 
 impl TramwayClient {
-    pub fn new(base_url: &str) -> Self {
-        let model = std::env::var("FERB_MODEL")
-            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+    pub fn new(base_url: &str, model: &str) -> Self {
         Self {
             base_url: base_url.to_string(),
             http: reqwest::Client::new(),
-            model,
+            model: model.to_string(),
         }
     }
 

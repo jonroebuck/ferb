@@ -58,13 +58,14 @@ pub(crate) struct SwitchboardConfig {
 #[derive(Debug, Deserialize)]
 pub(crate) struct TramwayConfig {
     pub url: String,
+    pub model: String,
 }
 
 #[derive(Serialize)]
 pub(crate) struct FerbToml {
     pub server: ServerToml,
-    pub switchboard: UrlToml,
-    pub tramway: UrlToml,
+    pub switchboard: SwitchboardToml,
+    pub tramway: TramwayToml,
 }
 
 #[derive(Serialize)]
@@ -73,8 +74,14 @@ pub(crate) struct ServerToml {
 }
 
 #[derive(Serialize)]
-pub(crate) struct UrlToml {
+pub(crate) struct SwitchboardToml {
     pub url: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct TramwayToml {
+    pub url: String,
+    pub model: String,
 }
 
 pub(crate) fn ferb_dir() -> PathBuf {
@@ -88,9 +95,11 @@ pub(crate) fn load_config() -> anyhow::Result<FerbConfig> {
         .set_default("server.port", 9090)?
         .set_default("switchboard.url", "http://localhost:4080")?
         .set_default("tramway.url", "http://localhost:8080")?
+        .set_default("tramway.model", "claude-sonnet-4-6")?
         .add_source(config::File::from(ferb_dir().join("ferb.toml")).required(false))
         .set_override_option("switchboard.url", std::env::var("SWITCHBOARD_URL").ok())?
         .set_override_option("tramway.url", std::env::var("TRAMWAY_URL").ok())?
+        .set_override_option("tramway.model", std::env::var("FERB_MODEL").ok())?
         .build()?;
 
     Ok(cfg.try_deserialize()?)

@@ -170,11 +170,12 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
 
     let config = crate::FerbToml {
         server: crate::ServerToml { port: 9090 },
-        switchboard: crate::UrlToml {
+        switchboard: crate::SwitchboardToml {
             url: switchboard_url.clone(),
         },
-        tramway: crate::UrlToml {
+        tramway: crate::TramwayToml {
             url: tramway_url,
+            model: "claude-sonnet-4-6".to_string(),
         },
     };
     let toml_str = toml::to_string_pretty(&config)?;
