@@ -5,6 +5,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const BUNDLED_COMPOSE: &str = include_str!("../docker-compose.yml");
+const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../workflows/default.yaml");
+const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../workflows/web-development.yaml");
 
 const SECRET_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
 
@@ -147,6 +149,20 @@ fn ensure_compose_file(ferb_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_workflows(ferb_dir: &Path) -> anyhow::Result<()> {
+    let wf_dir = ferb_dir.join("workflows");
+    std::fs::create_dir_all(&wf_dir)?;
+    let default_path = wf_dir.join("default.yaml");
+    if !default_path.exists() {
+        std::fs::write(&default_path, BUNDLED_DEFAULT_WORKFLOW)?;
+    }
+    let web_dev_path = wf_dir.join("web-development.yaml");
+    if !web_dev_path.exists() {
+        std::fs::write(&web_dev_path, BUNDLED_WEB_DEV_WORKFLOW)?;
+    }
+    Ok(())
+}
+
 fn ensure_secret(
     ferb_dir: &Path,
     env_name: &str,
@@ -179,6 +195,7 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(ferb_dir.join("secrets"))?;
 
     ensure_compose_file(ferb_dir)?;
+    ensure_workflows(ferb_dir)?;
 
     // Config: only write on first run
     let toml_path = ferb_dir.join("ferb.toml");
@@ -186,6 +203,11 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
         let switchboard_url = prompt("Switchboard URL", "http://localhost:4080")?;
         let tramway_url = prompt("Tramway URL", "http://localhost:8080")?;
 
+        let default_wf = ferb_dir
+            .join("workflows")
+            .join("default.yaml")
+            .to_string_lossy()
+            .to_string();
         let config = crate::FerbToml {
             server: crate::ServerToml { port: 9090 },
             switchboard: crate::SwitchboardToml {
@@ -195,6 +217,7 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
                 url: tramway_url,
                 model: "claude/claude-sonnet-4-6".to_string(),
             },
+            workflow: crate::WorkflowToml { default: default_wf },
         };
         let toml_str = toml::to_string_pretty(&config)?;
         std::fs::write(&toml_path, toml_str)?;
@@ -220,6 +243,7 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
 fn cmd_up_ci(ferb_dir: &Path) -> anyhow::Result<()> {
     check_docker()?;
     ensure_compose_file(ferb_dir)?;
+    ensure_workflows(ferb_dir)?;
 
     docker_compose_up(ferb_dir)?;
     wait_for_services(ferb_dir)?;

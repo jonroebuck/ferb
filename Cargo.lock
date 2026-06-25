@@ -422,11 +422,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
+name = "ferb-agent-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "ferb-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "ferb-approver"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "ferb-agent-core",
  "ferb-core",
+ "uuid",
 ]
 
 [[package]]
@@ -437,8 +456,11 @@ dependencies = [
  "clap",
  "config",
  "dirs",
+ "ferb-agent-core",
  "ferb-approver",
  "ferb-core",
+ "ferb-kanban-manager",
+ "ferb-message-admin",
  "ferb-moderator",
  "ferb-reviewer",
  "ferb-user-proxy",
@@ -464,11 +486,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferb-kanban-manager"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "ferb-agent-core",
+ "ferb-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "ferb-message-admin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "ferb-agent-core",
+ "ferb-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ferb-moderator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "ferb-agent-core",
  "ferb-core",
+ "uuid",
 ]
 
 [[package]]
@@ -476,11 +529,14 @@ name = "ferb-reviewer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "ferb-agent-core",
  "ferb-core",
  "ferb-utils",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -488,7 +544,10 @@ name = "ferb-user-proxy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "ferb-agent-core",
  "ferb-core",
+ "uuid",
 ]
 
 [[package]]
@@ -505,11 +564,14 @@ name = "ferb-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "ferb-agent-core",
  "ferb-core",
  "ferb-utils",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -2008,6 +2070,18 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "uuid"
+version = "1.23.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
+dependencies = [
+ "getrandom 0.4.3",
+ "js-sys",
+ "serde_core",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "vcpkg"

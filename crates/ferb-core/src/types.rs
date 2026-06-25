@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// A single message on the message channel.
@@ -107,6 +108,16 @@ pub struct FerbState {
     pub kanban_board: KanbanBoard,
     pub artifacts: serde_json::Value,
     pub pass: usize,
+    #[serde(default)]
+    pub active_workflow: Option<serde_json::Value>,
+    #[serde(default)]
+    pub channel_ids: HashMap<String, String>,
+    #[serde(default)]
+    pub thread_ids: HashMap<String, String>,
+    #[serde(default)]
+    pub card_ids: HashMap<String, String>,
+    #[serde(default)]
+    pub agent_assignments: HashMap<String, Vec<String>>,
 }
 
 impl FerbState {
@@ -116,6 +127,11 @@ impl FerbState {
             kanban_board,
             artifacts: serde_json::Value::Object(Default::default()),
             pass: 0,
+            active_workflow: None,
+            channel_ids: HashMap::new(),
+            thread_ids: HashMap::new(),
+            card_ids: HashMap::new(),
+            agent_assignments: HashMap::new(),
         }
     }
 

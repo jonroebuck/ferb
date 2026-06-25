@@ -5,11 +5,14 @@ edition = "2021"
 
 [dependencies]
 ferb-core = { path = "../ferb-core" }
+ferb-agent-core = { path = "../ferb-agent-core" }
 ferb-moderator = { path = "../ferb-moderator" }
 ferb-user-proxy = { path = "../ferb-user-proxy" }
 ferb-approver = { path = "../ferb-approver" }
 ferb-reviewer = { path = "../ferb-reviewer" }
 ferb-worker = { path = "../ferb-worker" }
+ferb-kanban-manager = { path = "../ferb-kanban-manager" }
+ferb-message-admin = { path = "../ferb-message-admin" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 config = "0.14"

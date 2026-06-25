@@ -1,7 +1,6 @@
 use ferb_approver::Approver;
 use ferb_core::{
-    FerbState, KanbanBoard, KanbanTask, SwitchboardClient, SwitchboardRunState, TaskStatus,
-    TramwayClient,
+    FerbState, KanbanBoard, KanbanTask, TaskStatus,
 };
 use ferb_moderator::Moderator;
 use ferb_reviewer::Reviewer;
@@ -97,10 +96,10 @@ fn print_kanban(state: &FerbState) {
 }
 
 async fn switchboard_start(
-    sb: &SwitchboardClient,
+    sb: &ferb_core::SwitchboardClient,
     title: &str,
     channel_id: Option<&str>,
-) -> Option<SwitchboardRunState> {
+) -> Option<ferb_core::SwitchboardRunState> {
     let issue = match sb.create_issue(title, "backlog").await {
         Ok(i) => i,
         Err(e) => {
@@ -142,7 +141,7 @@ async fn switchboard_start(
         }
     };
 
-    Some(SwitchboardRunState {
+    Some(ferb_core::SwitchboardRunState {
         issue_id: issue.id,
         channel_id: ch_id,
         thread_id,
@@ -150,8 +149,8 @@ async fn switchboard_start(
 }
 
 async fn switchboard_post_agent_completion(
-    sb: &SwitchboardClient,
-    run: &SwitchboardRunState,
+    sb: &ferb_core::SwitchboardClient,
+    run: &ferb_core::SwitchboardRunState,
     agent: &str,
     task_id: &str,
     task_name: &str,
@@ -174,8 +173,8 @@ async fn switchboard_post_agent_completion(
 }
 
 async fn switchboard_finish_success(
-    sb: &SwitchboardClient,
-    run: &SwitchboardRunState,
+    sb: &ferb_core::SwitchboardClient,
+    run: &ferb_core::SwitchboardRunState,
     state: &FerbState,
 ) {
     let mut summary = String::from("Ferb run completed successfully.\n\nCompleted tasks:");
@@ -202,8 +201,8 @@ async fn switchboard_finish_success(
 }
 
 async fn switchboard_finish_failure(
-    sb: &SwitchboardClient,
-    run: &SwitchboardRunState,
+    sb: &ferb_core::SwitchboardClient,
+    run: &ferb_core::SwitchboardRunState,
     error: &str,
 ) {
     let content = format!("Ferb run failed: {}", error);
@@ -222,28 +221,27 @@ async fn switchboard_finish_failure(
     }
 }
 
-async fn run_pipeline(
-    state: &mut FerbState,
-    client: &TramwayClient,
-    sb: &SwitchboardClient,
-    sb_run: &Option<SwitchboardRunState>,
-) -> anyhow::Result<()> {
-    let moderator = Moderator;
-    let user_proxy = UserProxy;
-    let approver = Approver;
-    let reviewer = Reviewer;
-    let worker = Worker;
+struct Agents<'a> {
+    moderator: &'a Moderator,
+    user_proxy: &'a UserProxy,
+    reviewer: &'a Reviewer,
+    worker: &'a Worker,
+    approver: &'a Approver,
+    sb: &'a ferb_core::SwitchboardClient,
+    sb_run: &'a Option<ferb_core::SwitchboardRunState>,
+}
 
+async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Result<()> {
     for pass in 0..MAX_PASSES {
         state.pass = pass;
         println!("--- Pass {} ---", pass + 1);
 
-        moderator.reconcile(state);
+        agents.moderator.reconcile(state);
 
-        let got_input = user_proxy.run(state)?;
+        let got_input = agents.user_proxy.run_legacy(state)?;
 
         if got_input {
-            moderator.reconcile(state);
+            agents.moderator.reconcile(state);
         }
 
         if state.kanban_board.all_done() {
@@ -275,13 +273,13 @@ async fn run_pipeline(
 
             match agent.as_str() {
                 "ferb-reviewer" => {
-                    reviewer.run(state, task_id, client).await?;
+                    agents.reviewer.run_legacy(state, task_id).await?;
                 }
                 "ferb-worker" => {
-                    worker.run(state, task_id, client).await?;
+                    agents.worker.run_legacy(state, task_id).await?;
                 }
                 "ferb-approver" => {
-                    approver.run(state, task_id);
+                    agents.approver.run_legacy(state, task_id);
                 }
                 _ => {
                     eprintln!("[warn] Unknown agent: {}", agent);
@@ -294,10 +292,10 @@ async fn run_pipeline(
                 .map(|t| t.status.clone());
 
             if status_after != status_before {
-                if let Some(run) = sb_run {
+                if let Some(run) = agents.sb_run {
                     let final_status = status_after.unwrap_or(TaskStatus::Pending);
                     switchboard_post_agent_completion(
-                        sb, run, &agent, task_id, &task_name, &final_status,
+                        agents.sb, run, &agent, task_id, &task_name, &final_status,
                     )
                     .await;
                 }
@@ -320,23 +318,50 @@ async fn run_pipeline(
 pub async fn run_task(
     goal: &str,
     channel_id: Option<&str>,
+    workflow_path: Option<&str>,
     config: &FerbConfig,
 ) -> anyhow::Result<()> {
-    let client = TramwayClient::new(&config.tramway.url, &config.tramway.model);
-    let sb = SwitchboardClient::new(&config.switchboard.url);
+    let sb_url = &config.switchboard.url;
+    let tw_url = &config.tramway.url;
+    let model = &config.tramway.model;
 
-    let workflow_path =
-        std::env::var("FERB_WORKFLOW").unwrap_or_else(|_| "workflows/default.yaml".to_string());
-    let kanban_board = load_workflow(&workflow_path)?;
+    let sb = ferb_core::SwitchboardClient::new(sb_url);
+    let moderator = Moderator::new(sb_url);
+    let user_proxy = UserProxy::new(sb_url);
+    let reviewer = Reviewer::new(sb_url, tw_url, model);
+    let worker = Worker::new(sb_url, tw_url, model);
+    let approver = Approver::new(sb_url);
+
+    let wf_path = workflow_path
+        .map(String::from)
+        .or_else(|| std::env::var("FERB_WORKFLOW").ok())
+        .unwrap_or_else(|| config.workflow.default.clone());
+    let kanban_board = load_workflow(&wf_path)?;
 
     let mut state = FerbState::new(kanban_board);
     state.send_message("user", "ferb-reviewer", "define-goal", goal);
+
+    if let Ok(wf_content) = std::fs::read_to_string(&wf_path) {
+        if let Ok(wf_val) = serde_yaml::from_str::<serde_json::Value>(&wf_content) {
+            state.active_workflow = Some(wf_val);
+        }
+    }
 
     let sb_run = switchboard_start(&sb, goal, channel_id).await;
 
     println!("\n=== Ferb ===\n");
 
-    let result = run_pipeline(&mut state, &client, &sb, &sb_run).await;
+    let agents = Agents {
+        moderator: &moderator,
+        user_proxy: &user_proxy,
+        reviewer: &reviewer,
+        worker: &worker,
+        approver: &approver,
+        sb: &sb,
+        sb_run: &sb_run,
+    };
+
+    let result = run_pipeline(&mut state, &agents).await;
 
     match &result {
         Ok(()) => {

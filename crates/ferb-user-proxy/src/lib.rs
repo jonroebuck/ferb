@@ -1,14 +1,24 @@
 use std::io::{self, BufRead, Write};
+
+use async_trait::async_trait;
+use ferb_agent_core::{
+    AgentResponse, AnswerRequest, FerbAgent, HasSwitchboard, KanbanAgent, SwitchboardClient,
+    ThreadAgent, Uuid,
+};
 use ferb_core::FerbState;
 
-pub struct UserProxy;
+pub struct UserProxy {
+    sb: SwitchboardClient,
+}
 
 impl UserProxy {
-    /// Check the message channel for any messages directed to "user".
-    /// Print them and collect the user's response.
-    /// Write the response back to the message channel.
-    /// Returns true if user input was collected.
-    pub fn run(&self, state: &mut FerbState) -> anyhow::Result<bool> {
+    pub fn new(switchboard_url: &str) -> Self {
+        Self {
+            sb: SwitchboardClient::new(switchboard_url),
+        }
+    }
+
+    pub fn run_legacy(&self, state: &mut FerbState) -> anyhow::Result<bool> {
         let pending: Vec<_> = state
             .message_channel
             .iter()
@@ -58,5 +68,66 @@ impl UserProxy {
         state.send_message("user", &agent, &task, &answer);
 
         Ok(true)
+    }
+}
+
+impl HasSwitchboard for UserProxy {
+    fn switchboard(&self) -> &SwitchboardClient {
+        &self.sb
+    }
+}
+
+#[async_trait]
+impl KanbanAgent for UserProxy {}
+
+#[async_trait]
+impl ThreadAgent for UserProxy {}
+
+#[async_trait]
+impl FerbAgent for UserProxy {
+    fn agent_name(&self) -> &str {
+        "ferb-user-proxy"
+    }
+
+    async fn run(
+        &self,
+        card_id: Uuid,
+        _state: &FerbState,
+    ) -> anyhow::Result<AgentResponse> {
+        let questions = self.list_card_questions(card_id).await.unwrap_or_default();
+
+        let unanswered: Vec<_> = questions
+            .iter()
+            .filter(|q| q.answer.is_none() && q.asked_by != "ferb-user-proxy")
+            .collect();
+
+        let mut answers = vec![];
+        for q in unanswered {
+            println!("[{}] {}", q.asked_by, q.text);
+            print!("\nYour response: ");
+            io::stdout().flush()?;
+
+            let stdin = io::stdin();
+            let mut input = String::new();
+            stdin.lock().read_line(&mut input)?;
+            let input = input.trim().to_string();
+
+            if !input.is_empty() {
+                answers.push(AnswerRequest {
+                    question_id: q.id,
+                    text: input,
+                    answered_by: "ferb-user-proxy".to_string(),
+                });
+            }
+        }
+
+        Ok(AgentResponse {
+            done: answers.is_empty() && questions.iter().all(|q| q.answer.is_some()),
+            card_id: card_id.to_string(),
+            questions: vec![],
+            answers,
+            artifacts: vec![],
+            message: String::new(),
+        })
     }
 }

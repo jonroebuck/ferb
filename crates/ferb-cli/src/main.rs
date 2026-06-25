@@ -24,6 +24,10 @@ struct RunArgs {
     /// Resume posting to an existing Switchboard channel
     #[arg(long)]
     channel: Option<String>,
+
+    /// Path to workflow YAML file
+    #[arg(long)]
+    workflow: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -43,6 +47,7 @@ pub(crate) struct FerbConfig {
     pub server: ServerConfig,
     pub switchboard: SwitchboardConfig,
     pub tramway: TramwayConfig,
+    pub workflow: WorkflowConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,11 +66,17 @@ pub(crate) struct TramwayConfig {
     pub model: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct WorkflowConfig {
+    pub default: String,
+}
+
 #[derive(Serialize)]
 pub(crate) struct FerbToml {
     pub server: ServerToml,
     pub switchboard: SwitchboardToml,
     pub tramway: TramwayToml,
+    pub workflow: WorkflowToml,
 }
 
 #[derive(Serialize)]
@@ -84,6 +95,11 @@ pub(crate) struct TramwayToml {
     pub model: String,
 }
 
+#[derive(Serialize)]
+pub(crate) struct WorkflowToml {
+    pub default: String,
+}
+
 pub(crate) fn ferb_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -91,11 +107,18 @@ pub(crate) fn ferb_dir() -> PathBuf {
 }
 
 pub(crate) fn load_config() -> anyhow::Result<FerbConfig> {
+    let default_workflow = ferb_dir()
+        .join("workflows")
+        .join("default.yaml")
+        .to_string_lossy()
+        .to_string();
+
     let cfg = config::Config::builder()
         .set_default("server.port", 9090)?
         .set_default("switchboard.url", "http://localhost:4080")?
         .set_default("tramway.url", "http://localhost:8080")?
         .set_default("tramway.model", "claude/claude-sonnet-4-6")?
+        .set_default("workflow.default", default_workflow)?
         .add_source(config::File::from(ferb_dir().join("ferb.toml")).required(false))
         .set_override_option("switchboard.url", std::env::var("SWITCHBOARD_URL").ok())?
         .set_override_option("tramway.url", std::env::var("TRAMWAY_URL").ok())?
@@ -117,13 +140,20 @@ async fn main() -> anyhow::Result<()> {
         None => {
             if cli.run_args.goal.is_empty() {
                 anyhow::bail!(
-                    "Usage: ferb <goal text> [--channel <id>]\n       ferb up|start|stop|status"
+                    "Usage: ferb <goal text> [--channel <id>] [--workflow <path>]\n\
+                     ferb up|start|stop|status"
                 );
             }
             let goal = cli.run_args.goal.join(" ");
             let config = load_config()?;
             eprintln!("[info] Using Tramway model: {}", config.tramway.model);
-            run::run_task(&goal, cli.run_args.channel.as_deref(), &config).await
+            run::run_task(
+                &goal,
+                cli.run_args.channel.as_deref(),
+                cli.run_args.workflow.as_deref(),
+                &config,
+            )
+            .await
         }
     }
 }

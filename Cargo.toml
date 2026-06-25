@@ -2,19 +2,25 @@
 members = [
     "crates/ferb-core",
     "crates/ferb-utils",
+    "crates/ferb-agent-core",
     "crates/ferb-moderator",
     "crates/ferb-user-proxy",
     "crates/ferb-approver",
     "crates/ferb-reviewer",
     "crates/ferb-worker",
+    "crates/ferb-kanban-manager",
+    "crates/ferb-message-admin",
     "crates/ferb-cli",
 ]
 resolver = "2"
 
 [workspace.dependencies]
 ferb-core = { path = "crates/ferb-core" }
+ferb-agent-core = { path = "crates/ferb-agent-core" }
 anyhow = "1"
+async-trait = "0.1"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4", "serde"] }

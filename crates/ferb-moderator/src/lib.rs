@@ -1,12 +1,41 @@
+use async_trait::async_trait;
+use ferb_agent_core::{
+    AgentResponse, FerbAgent, HasSwitchboard, KanbanAgent, SwitchboardClient, ThreadAgent, Uuid,
+    Workflow,
+};
 use ferb_core::{FerbState, KanbanQuestion, QuestionStatus, TaskStatus};
 
-pub struct Moderator;
+pub struct Moderator {
+    sb: SwitchboardClient,
+}
 
 impl Moderator {
-    /// Reconcile the message channel against the kanban board.
-    /// - Agent messages containing questions -> added to task card as Unanswered
-    /// - User reply messages -> matched to oldest Unanswered question on that task
-    /// - Tasks with Unanswered questions -> kept InProgress
+    pub fn new(switchboard_url: &str) -> Self {
+        Self {
+            sb: SwitchboardClient::new(switchboard_url),
+        }
+    }
+
+    pub async fn setup_channels(
+        &self,
+        workflow: &Workflow,
+        state: &mut FerbState,
+    ) -> anyhow::Result<()> {
+        for ch_def in &workflow.channels {
+            let channel = self.sb.create_channel(&ch_def.name).await?;
+            state
+                .channel_ids
+                .insert(ch_def.name.clone(), channel.id.to_string());
+
+            for th_def in &ch_def.threads {
+                let thread = self.sb.create_thread(channel.id, &th_def.name).await?;
+                let key = format!("{}:{}", ch_def.name, th_def.name);
+                state.thread_ids.insert(key, thread.id.to_string());
+            }
+        }
+        Ok(())
+    }
+
     pub fn reconcile(&self, state: &mut FerbState) {
         let messages = state.message_channel.clone();
 
@@ -58,7 +87,8 @@ impl Moderator {
             }
         }
 
-        let task_ids: Vec<String> = state.kanban_board.tasks.iter().map(|t| t.id.clone()).collect();
+        let task_ids: Vec<String> =
+            state.kanban_board.tasks.iter().map(|t| t.id.clone()).collect();
 
         for id in task_ids {
             let has_unanswered = state.kanban_board.has_unanswered_questions(&id);
@@ -68,5 +98,39 @@ impl Moderator {
                 }
             }
         }
+    }
+}
+
+impl HasSwitchboard for Moderator {
+    fn switchboard(&self) -> &SwitchboardClient {
+        &self.sb
+    }
+}
+
+#[async_trait]
+impl KanbanAgent for Moderator {}
+
+#[async_trait]
+impl ThreadAgent for Moderator {}
+
+#[async_trait]
+impl FerbAgent for Moderator {
+    fn agent_name(&self) -> &str {
+        "ferb-moderator"
+    }
+
+    async fn run(
+        &self,
+        card_id: Uuid,
+        _state: &FerbState,
+    ) -> anyhow::Result<AgentResponse> {
+        Ok(AgentResponse {
+            done: true,
+            card_id: card_id.to_string(),
+            questions: vec![],
+            answers: vec![],
+            artifacts: vec![],
+            message: "Channels and threads configured".to_string(),
+        })
     }
 }

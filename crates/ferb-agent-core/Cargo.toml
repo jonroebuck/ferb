@@ -1,0 +1,18 @@
+[package]
+name = "ferb-agent-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ferb-core = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"
