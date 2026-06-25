@@ -45,24 +45,38 @@ fn prompt(label: &str, default: &str) -> anyhow::Result<String> {
     }
 }
 
-fn write_secret(ferb_dir: &Path, name: &str, value: &str) -> anyhow::Result<()> {
+fn secret_filename(env_name: &str) -> String {
+    env_name.to_lowercase()
+}
+
+fn write_secret(ferb_dir: &Path, env_name: &str, value: &str) -> anyhow::Result<()> {
     let secrets_dir = ferb_dir.join("secrets");
     std::fs::create_dir_all(&secrets_dir)?;
-    std::fs::write(secrets_dir.join(name), value)?;
+    std::fs::write(secrets_dir.join(secret_filename(env_name)), value)?;
     Ok(())
 }
 
+fn read_secret(ferb_dir: &Path, env_name: &str) -> Option<String> {
+    if let Ok(val) = std::env::var(env_name) {
+        if !val.is_empty() {
+            return Some(val);
+        }
+    }
+    let path = ferb_dir.join("secrets").join(secret_filename(env_name));
+    if let Ok(val) = std::fs::read_to_string(path) {
+        let val = val.trim().to_string();
+        if !val.is_empty() {
+            return Some(val);
+        }
+    }
+    None
+}
+
 fn load_secrets(ferb_dir: &Path) -> HashMap<String, String> {
-    let secrets_dir = ferb_dir.join("secrets");
     let mut secrets = HashMap::new();
     for key in SECRET_KEYS {
-        if let Ok(val) = std::env::var(key) {
+        if let Some(val) = read_secret(ferb_dir, key) {
             secrets.insert(key.to_string(), val);
-        } else if let Ok(val) = std::fs::read_to_string(secrets_dir.join(key)) {
-            let val = val.trim().to_string();
-            if !val.is_empty() {
-                secrets.insert(key.to_string(), val);
-            }
         }
     }
     secrets
@@ -133,6 +147,32 @@ fn ensure_compose_file(ferb_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_secret(
+    ferb_dir: &Path,
+    env_name: &str,
+    required: bool,
+) -> anyhow::Result<()> {
+    if read_secret(ferb_dir, env_name).is_some() {
+        println!("{}: (already set)", env_name);
+        return Ok(());
+    }
+
+    let label = if required {
+        env_name.to_string()
+    } else {
+        format!("{} (optional, press Enter to skip)", env_name)
+    };
+    let value = prompt(&label, "")?;
+
+    if value.is_empty() && required {
+        anyhow::bail!("{} is required", env_name);
+    }
+    if !value.is_empty() {
+        write_secret(ferb_dir, env_name, &value)?;
+    }
+    Ok(())
+}
+
 fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
     check_docker()?;
 
@@ -140,35 +180,9 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
 
     ensure_compose_file(ferb_dir)?;
 
+    // Config: only write on first run
     let toml_path = ferb_dir.join("ferb.toml");
-    let first_run = !toml_path.exists();
-
-    if first_run {
-        let anthropic_key = if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            println!("ANTHROPIC_API_KEY: (using environment variable)");
-            key
-        } else {
-            let key = prompt("ANTHROPIC_API_KEY", "")?;
-            if key.is_empty() {
-                anyhow::bail!("ANTHROPIC_API_KEY is required");
-            }
-            key
-        };
-
-        let openai_key = if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-            println!("OPENAI_API_KEY: (using environment variable)");
-            key
-        } else {
-            prompt("OPENAI_API_KEY (optional, press Enter to skip)", "")?
-        };
-
-        let gemini_key = if let Ok(key) = std::env::var("GEMINI_API_KEY") {
-            println!("GEMINI_API_KEY: (using environment variable)");
-            key
-        } else {
-            prompt("GEMINI_API_KEY (optional, press Enter to skip)", "")?
-        };
-
+    if !toml_path.exists() {
         let switchboard_url = prompt("Switchboard URL", "http://localhost:4080")?;
         let tramway_url = prompt("Tramway URL", "http://localhost:8080")?;
 
@@ -184,17 +198,14 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
         };
         let toml_str = toml::to_string_pretty(&config)?;
         std::fs::write(&toml_path, toml_str)?;
-
-        write_secret(ferb_dir, "ANTHROPIC_API_KEY", &anthropic_key)?;
-        if !openai_key.is_empty() {
-            write_secret(ferb_dir, "OPENAI_API_KEY", &openai_key)?;
-        }
-        if !gemini_key.is_empty() {
-            write_secret(ferb_dir, "GEMINI_API_KEY", &gemini_key)?;
-        }
     } else {
         println!("Config already exists at {}", toml_path.display());
     }
+
+    // Secrets: always check, prompt only for missing ones
+    ensure_secret(ferb_dir, "ANTHROPIC_API_KEY", true)?;
+    ensure_secret(ferb_dir, "OPENAI_API_KEY", false)?;
+    ensure_secret(ferb_dir, "GEMINI_API_KEY", false)?;
 
     docker_compose_up(ferb_dir)?;
     wait_for_services(ferb_dir)?;
