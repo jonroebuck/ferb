@@ -122,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
             }
             let goal = cli.run_args.goal.join(" ");
             let config = load_config()?;
+            eprintln!("[info] Using Tramway model: {}", config.tramway.model);
             run::run_task(&goal, cli.run_args.channel.as_deref(), &config).await
         }
     }
