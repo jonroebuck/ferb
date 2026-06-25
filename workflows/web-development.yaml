@@ -1,0 +1,22 @@
+name: web-development
+description: Build web pages and frontend applications
+
+channels:
+  - name: general
+    threads:
+      - name: define-goal
+      - name: progress
+      - name: artifacts
+
+cards:
+  - title: define-goal
+    agents: [ferb-reviewer, ferb-user-proxy]
+
+  - title: develop-plan
+    agents: [ferb-worker, ferb-reviewer]
+
+  - title: create-artifact
+    agents: [ferb-worker, ferb-reviewer]
+
+  - title: review-artifact
+    agents: [ferb-reviewer, ferb-approver]

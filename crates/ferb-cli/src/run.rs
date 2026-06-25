@@ -1,14 +1,19 @@
+use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use ferb_approver::Approver;
-use ferb_core::{
-    FerbState, KanbanBoard, KanbanTask, TaskStatus,
-};
+use ferb_core::{FerbState, KanbanBoard, KanbanTask, TaskStatus};
 use ferb_moderator::Moderator;
 use ferb_reviewer::Reviewer;
 use ferb_user_proxy::UserProxy;
 use ferb_worker::Worker;
 use serde::Deserialize;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::FerbConfig;
+
+const MAX_PASSES: usize = 100;
+const MAX_DEFINE_GOAL_ITERATIONS: usize = 10;
 
 fn expand_tilde(path: &str) -> PathBuf {
     if path.starts_with("~/") || path == "~" {
@@ -24,10 +29,6 @@ fn expand_tilde(path: &str) -> PathBuf {
         PathBuf::from(path)
     }
 }
-
-use crate::FerbConfig;
-
-const MAX_PASSES: usize = 100;
 
 #[derive(Debug, Deserialize)]
 struct WorkflowTaskDef {
@@ -181,7 +182,7 @@ async fn switchboard_post_agent_completion(
         ts, agent, task_name, task_id, status
     );
     if let Err(e) = sb
-        .post_to_thread(&run.channel_id, &run.thread_id, &content)
+        .post_to_thread(&run.channel_id, &run.thread_id, "system", &content)
         .await
     {
         eprintln!("[warn] Switchboard: failed to post agent completion: {}", e);
@@ -199,7 +200,7 @@ async fn switchboard_finish_success(
     }
 
     if let Err(e) = sb
-        .post_to_thread(&run.channel_id, &run.thread_id, &summary)
+        .post_to_thread(&run.channel_id, &run.thread_id, "system", &summary)
         .await
     {
         eprintln!(
@@ -223,7 +224,7 @@ async fn switchboard_finish_failure(
 ) {
     let content = format!("Ferb run failed: {}", error);
     if let Err(e) = sb
-        .post_to_thread(&run.channel_id, &run.thread_id, &content)
+        .post_to_thread(&run.channel_id, &run.thread_id, "system", &content)
         .await
     {
         eprintln!("[warn] Switchboard: failed to post error details: {}", e);
@@ -237,6 +238,245 @@ async fn switchboard_finish_failure(
     }
 }
 
+// ── Define-Goal Phase ──────────────────────────────────────────────────────
+
+/// Parse a labeled post envelope: `{"type": "...", "content": "..."}`.
+/// Returns (type_str, content_str). Falls back to ("status", raw) for non-JSON.
+#[allow(dead_code)]
+fn parse_labeled_post_content(content: &str) -> (String, String) {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        let t = val["type"].as_str().unwrap_or("status").to_string();
+        let c = val["content"].as_str().unwrap_or(content).to_string();
+        return (t, c);
+    }
+    ("status".to_string(), content.to_string())
+}
+
+/// Run the define-goal conversation between the reviewer and the user.
+///
+/// - Creates a "general" Switchboard channel and a "define-goal" thread.
+/// - Posts the raw goal as the first message from ferb-user-proxy.
+/// - Loops: reviewer analyzes thread → posts question or summary → user responds.
+/// - On user confirmation: stores the goal artifact, marks the card Done.
+/// - If Switchboard is unavailable: falls back to storing the raw goal directly.
+async fn run_define_goal_phase(
+    state: &mut FerbState,
+    sb: &ferb_core::SwitchboardClient,
+    reviewer: &Reviewer,
+    goal: &str,
+) -> anyhow::Result<()> {
+    // Try to set up the Switchboard channel + thread.
+    let (channel_id, thread_id) = match setup_define_goal_channel(sb, goal, state).await {
+        Some(ids) => ids,
+        None => {
+            // Switchboard unavailable — store the raw goal and continue.
+            store_raw_goal(state, goal);
+            return Ok(());
+        }
+    };
+
+    // Post the initial task description from the user.
+    if let Err(e) = sb
+        .post_to_thread(&channel_id, &thread_id, "ferb-user-proxy", goal)
+        .await
+    {
+        eprintln!("[warn] Failed to post initial goal to thread: {}", e);
+    }
+
+    for _iteration in 0..MAX_DEFINE_GOAL_ITERATIONS {
+        // Reviewer reads the thread and posts a question or refined-goal summary.
+        match reviewer
+            .analyze_define_goal_thread(sb, &channel_id, &thread_id)
+            .await
+        {
+            Ok((action, content)) => {
+                let post_type = if action == "summarize" { "summary" } else { "question" };
+                let envelope = serde_json::json!({
+                    "type": post_type,
+                    "content": content,
+                })
+                .to_string();
+
+                let _ = sb
+                    .post_to_thread(&channel_id, &thread_id, "ferb-reviewer", &envelope)
+                    .await
+                    .map_err(|e| eprintln!("[warn] Failed to post reviewer response: {}", e));
+
+                println!("\n[ferb-reviewer]\n{}\n", content);
+
+                if action == "summarize" {
+                    if handle_summary_confirmation(sb, &channel_id, &thread_id, state, goal, &content).await? {
+                        return Ok(());
+                    }
+                } else {
+                    collect_and_post_answer(sb, &channel_id, &thread_id).await?;
+                }
+            }
+            Err(e) => {
+                eprintln!("[warn] Reviewer analyze_define_goal_thread failed: {}", e);
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "Define-goal phase exceeded {} iterations without user confirmation",
+        MAX_DEFINE_GOAL_ITERATIONS
+    )
+}
+
+async fn setup_define_goal_channel(
+    sb: &ferb_core::SwitchboardClient,
+    goal: &str,
+    state: &mut FerbState,
+) -> Option<(String, String)> {
+    let channel = match sb.create_channel("ferb-general").await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[warn] Switchboard unavailable for define-goal: {}", e);
+            return None;
+        }
+    };
+
+    let thread = match sb
+        .create_thread(&channel.id, &format!("Define Goal: {}", goal))
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[warn] Could not create define-goal thread: {}", e);
+            return None;
+        }
+    };
+
+    state
+        .channel_ids
+        .insert("general".to_string(), channel.id.clone());
+    state
+        .thread_ids
+        .insert("define-goal".to_string(), thread.id.clone());
+
+    Some((channel.id, thread.id))
+}
+
+fn store_raw_goal(state: &mut FerbState, goal: &str) {
+    state.set_artifact(
+        "define-goal",
+        serde_json::json!({ "original_task": goal, "refined_goal": goal }),
+    );
+    if let Some(t) = state.kanban_board.get_task_mut("define-goal") {
+        t.status = TaskStatus::Done;
+    }
+}
+
+/// Show a refined-goal summary and ask the user to confirm or reject it.
+/// Returns true when the user confirms and the goal is stored.
+async fn handle_summary_confirmation(
+    sb: &ferb_core::SwitchboardClient,
+    channel_id: &str,
+    thread_id: &str,
+    state: &mut FerbState,
+    original_goal: &str,
+    refined_content: &str,
+) -> anyhow::Result<bool> {
+    print!("Does this look right? (yes/no): ");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().lock().read_line(&mut input)?;
+    let input = input.trim().to_lowercase();
+
+    if input == "yes" || input == "y" {
+        let _ = sb
+            .post_to_thread(
+                channel_id,
+                thread_id,
+                "ferb-user-proxy",
+                &serde_json::json!({
+                    "type": "confirmation",
+                    "content": "Goal confirmed."
+                })
+                .to_string(),
+            )
+            .await;
+
+        state.set_artifact(
+            "define-goal",
+            serde_json::json!({
+                "original_task": original_goal,
+                "refined_goal": refined_content,
+            }),
+        );
+
+        if let Some(t) = state.kanban_board.get_task_mut("define-goal") {
+            t.status = TaskStatus::Done;
+        }
+
+        // Post a status update to the progress thread if it exists.
+        if let Some(run_channel) = state.channel_ids.get("progress") {
+            if let Some(run_thread) = state.thread_ids.get("progress") {
+                let _ = sb
+                    .post_to_thread(
+                        run_channel,
+                        run_thread,
+                        "system",
+                        "Define Goal card complete — goal confirmed by user.",
+                    )
+                    .await;
+            }
+        }
+
+        println!("\n✓ Goal confirmed.\n");
+        return Ok(true);
+    }
+
+    // Rejection: collect feedback and post it so the reviewer can refine further.
+    print!("What should be different? ");
+    io::stdout().flush()?;
+    let mut feedback = String::new();
+    io::stdin().lock().read_line(&mut feedback)?;
+    let feedback = feedback.trim();
+
+    let reply = if feedback.is_empty() {
+        "Please refine further.".to_string()
+    } else {
+        format!("Please refine further: {}", feedback)
+    };
+
+    let _ = sb
+        .post_to_thread(
+            channel_id,
+            thread_id,
+            "ferb-user-proxy",
+            &serde_json::json!({ "type": "status", "content": reply }).to_string(),
+        )
+        .await;
+
+    Ok(false)
+}
+
+/// Ask for the user's answer to a reviewer question and post it to the thread.
+async fn collect_and_post_answer(
+    sb: &ferb_core::SwitchboardClient,
+    channel_id: &str,
+    thread_id: &str,
+) -> anyhow::Result<()> {
+    print!("Your answer: ");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().lock().read_line(&mut answer)?;
+    let answer = answer.trim();
+
+    if !answer.is_empty() {
+        let _ = sb
+            .post_to_thread(channel_id, thread_id, "ferb-user-proxy", answer)
+            .await
+            .map_err(|e| eprintln!("[warn] Failed to post answer: {}", e));
+    }
+
+    Ok(())
+}
+
+// ── Pipeline ──────────────────────────────────────────────────────────────
+
 struct Agents<'a> {
     moderator: &'a Moderator,
     user_proxy: &'a UserProxy,
@@ -248,6 +488,8 @@ struct Agents<'a> {
 }
 
 async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Result<()> {
+    let mut printed_headers: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     for pass in 0..MAX_PASSES {
         state.pass = pass;
         println!("--- Pass {} ---", pass + 1);
@@ -277,10 +519,21 @@ async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Res
             .collect();
 
         for task_id in &task_ids {
-            let (agent, task_name) = match state.kanban_board.get_task(task_id) {
-                Some(t) => (t.agent.clone(), t.name.clone()),
+            let (agent, task_name, task_status) = match state.kanban_board.get_task(task_id) {
+                Some(t) => (t.agent.clone(), t.name.clone(), t.status.clone()),
                 None => continue,
             };
+
+            // Skip tasks that are already done.
+            if task_status == TaskStatus::Done {
+                continue;
+            }
+
+            // Print a section header the first time each task becomes active.
+            if !printed_headers.contains(task_id) {
+                println!("\n=== {} ===\n", task_name);
+                printed_headers.insert(task_id.clone());
+            }
 
             let status_before = state
                 .kanban_board
@@ -357,7 +610,6 @@ pub async fn run_task(
     let kanban_board = load_workflow(&wf_path_str)?;
 
     let mut state = FerbState::new(kanban_board);
-    state.send_message("user", "ferb-reviewer", "define-goal", goal);
 
     if let Ok(wf_content) = std::fs::read_to_string(&wf_path) {
         if let Ok(wf_val) = serde_yaml::from_str::<serde_json::Value>(&wf_content) {
@@ -365,9 +617,31 @@ pub async fn run_task(
         }
     }
 
-    let sb_run = switchboard_start(&sb, goal, channel_id).await;
-
     println!("\n=== Ferb ===\n");
+
+    // ── Define Goal phase (conversation-based) ────────────────────────────
+    if state.kanban_board.get_task("define-goal").is_some() {
+        println!("=== Define Goal ===\n");
+        run_define_goal_phase(&mut state, &sb, &reviewer, goal).await?;
+    } else {
+        // Legacy seed: no define-goal task, seed the goal via message channel.
+        state.send_message("user", "ferb-reviewer", "define-goal", goal);
+    }
+
+    // ── Switchboard run tracking (progress channel) ───────────────────────
+    // Reuse the channel created during define-goal phase if available.
+    let define_goal_channel = state.channel_ids.get("general").cloned();
+    let effective_channel = channel_id
+        .map(String::from)
+        .or(define_goal_channel);
+
+    let sb_run = switchboard_start(&sb, goal, effective_channel.as_deref()).await;
+
+    // Store the progress thread in state so handle_summary_confirmation can reach it.
+    if let Some(ref run) = sb_run {
+        state.channel_ids.insert("progress".to_string(), run.channel_id.clone());
+        state.thread_ids.insert("progress".to_string(), run.thread_id.clone());
+    }
 
     let agents = Agents {
         moderator: &moderator,
@@ -395,4 +669,72 @@ pub async fn run_task(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_labeled_question() {
+        let raw = r#"{"type":"question","content":"What is the target audience?"}"#;
+        let (t, c) = parse_labeled_post_content(raw);
+        assert_eq!(t, "question");
+        assert_eq!(c, "What is the target audience?");
+    }
+
+    #[test]
+    fn parse_labeled_summary() {
+        let raw = r#"{"type":"summary","content":"Refined Goal: Build an app."}"#;
+        let (t, c) = parse_labeled_post_content(raw);
+        assert_eq!(t, "summary");
+        assert!(c.contains("Refined Goal"));
+    }
+
+    #[test]
+    fn parse_labeled_non_json_falls_back() {
+        let raw = "some plain text";
+        let (t, c) = parse_labeled_post_content(raw);
+        assert_eq!(t, "status");
+        assert_eq!(c, "some plain text");
+    }
+
+    #[test]
+    fn parse_labeled_missing_type_defaults_to_status() {
+        let raw = r#"{"content":"just a content field"}"#;
+        let (t, _) = parse_labeled_post_content(raw);
+        assert_eq!(t, "status");
+    }
+
+    #[test]
+    fn store_raw_goal_marks_define_goal_done() {
+        use ferb_core::{KanbanBoard, KanbanTask, TaskStatus};
+
+        let board = KanbanBoard {
+            tasks: vec![KanbanTask {
+                id: "define-goal".to_string(),
+                name: "Define Goal".to_string(),
+                agent: "ferb-user-proxy".to_string(),
+                prompt: None,
+                status: TaskStatus::Pending,
+                inputs: vec![],
+                reviews: None,
+                approves: None,
+                max_iterations: 5,
+                iterations_used: 0,
+                questions: vec![],
+                comments: vec![],
+                success_criteria: vec![],
+            }],
+        };
+        let mut state = FerbState::new(board);
+        store_raw_goal(&mut state, "Build a calculator");
+
+        assert_eq!(
+            state.kanban_board.get_task("define-goal").unwrap().status,
+            TaskStatus::Done
+        );
+        let artifact = state.get_artifact("define-goal").unwrap();
+        assert_eq!(artifact["original_task"], "Build a calculator");
+    }
 }

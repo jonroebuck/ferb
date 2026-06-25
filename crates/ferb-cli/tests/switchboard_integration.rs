@@ -100,7 +100,7 @@ async fn test_agent_completion_posted_to_channel() {
     let client = SwitchboardClient::new(&server.uri());
 
     let post = client
-        .post_to_thread("ch-1", "th-1", "agent completed")
+        .post_to_thread("ch-1", "th-1", "system", "agent completed")
         .await
         .unwrap();
     assert_eq!(post.id, "post-1");
@@ -288,6 +288,7 @@ async fn test_full_lifecycle_with_agent_completions() {
         .post_to_thread(
             &run_state.channel_id,
             &run_state.thread_id,
+            "system",
             "Agent: ferb-reviewer | Task: define-goal | Status: Done",
         )
         .await
@@ -297,6 +298,7 @@ async fn test_full_lifecycle_with_agent_completions() {
         .post_to_thread(
             &run_state.channel_id,
             &run_state.thread_id,
+            "system",
             "Agent: ferb-worker | Task: make-plan | Status: ReadyForReview",
         )
         .await
@@ -307,6 +309,7 @@ async fn test_full_lifecycle_with_agent_completions() {
         .post_to_thread(
             &run_state.channel_id,
             &run_state.thread_id,
+            "system",
             "Ferb run completed successfully.",
         )
         .await

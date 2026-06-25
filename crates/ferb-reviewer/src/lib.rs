@@ -5,7 +5,7 @@ use ferb_agent_core::{
     AgentResponse, ArtifactEntry, FerbAgent, HasSwitchboard, KanbanAgent, SwitchboardClient,
     ThreadAgent, Uuid,
 };
-use ferb_core::{FerbState, KanbanComment, TaskStatus, TramwayClient};
+use ferb_core::{FerbState, KanbanComment, SwitchboardClient as CoreSwitchboardClient, TaskStatus, TramwayClient};
 use serde::Deserialize;
 
 fn prompts_dir() -> PathBuf {
@@ -34,6 +34,12 @@ struct KanbanUpdate {
     pub task_id: String,
     pub status: String,
     pub comment: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DefineGoalLlmResponse {
+    pub action: String,
+    pub content: String,
 }
 
 pub struct Reviewer {
@@ -127,6 +133,53 @@ impl Reviewer {
 
         Ok(())
     }
+
+    /// Analyze the define-goal thread history and return (action, content).
+    /// `action` is "ask" (has questions) or "summarize" (ready to confirm).
+    /// `content` is the text to post to the thread.
+    pub async fn analyze_define_goal_thread(
+        &self,
+        sb: &CoreSwitchboardClient,
+        channel_id: &str,
+        thread_id: &str,
+    ) -> anyhow::Result<(String, String)> {
+        let posts = sb
+            .list_thread_posts(channel_id, thread_id)
+            .await
+            .unwrap_or_default();
+
+        let context = build_thread_context(&posts);
+        let system_prompt = load_prompt("define-goal-reviewer.md")?;
+        let raw = self.tramway.complete(&system_prompt, &context).await?;
+
+        let resp: DefineGoalLlmResponse = ferb_utils::parse_json(&raw).map_err(|e| {
+            anyhow::anyhow!(
+                "define-goal reviewer parse error: {}\nRaw (first 300 chars): {}",
+                e,
+                &raw[..raw.len().min(300)]
+            )
+        })?;
+
+        Ok((resp.action, resp.content))
+    }
+}
+
+fn build_thread_context(posts: &[ferb_core::PostResponse]) -> String {
+    let mut ctx = String::from("## Thread History\n\n");
+    for post in posts {
+        let display = extract_inner_content(&post.content);
+        ctx.push_str(&format!("[{}]: {}\n\n", post.author, display));
+    }
+    ctx
+}
+
+fn extract_inner_content(content: &str) -> String {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(c) = val["content"].as_str() {
+            return c.to_string();
+        }
+    }
+    content.to_string()
 }
 
 impl HasSwitchboard for Reviewer {
@@ -252,4 +305,58 @@ fn build_context(state: &FerbState, task_id: &str) -> String {
     }
 
     ctx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferb_core::PostResponse;
+
+    fn make_post(author: &str, content: &str) -> PostResponse {
+        PostResponse {
+            id: "test-id".to_string(),
+            author: author.to_string(),
+            content: content.to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn build_thread_context_formats_posts() {
+        let posts = vec![
+            make_post("ferb-user-proxy", "Build a todo app"),
+            make_post(
+                "ferb-reviewer",
+                r#"{"type":"question","content":"What framework?"}"#,
+            ),
+            make_post("ferb-user-proxy", "React"),
+        ];
+        let ctx = build_thread_context(&posts);
+        assert!(ctx.contains("[ferb-user-proxy]: Build a todo app"));
+        assert!(ctx.contains("[ferb-reviewer]: What framework?"));
+        assert!(ctx.contains("[ferb-user-proxy]: React"));
+    }
+
+    #[test]
+    fn extract_inner_content_unwraps_json() {
+        let content = r#"{"type":"summary","content":"Here is the goal"}"#;
+        assert_eq!(extract_inner_content(content), "Here is the goal");
+    }
+
+    #[test]
+    fn extract_inner_content_falls_back_to_raw() {
+        let content = "plain text post";
+        assert_eq!(extract_inner_content(content), "plain text post");
+    }
+
+    #[test]
+    fn build_thread_context_includes_all_authors() {
+        let posts = vec![
+            make_post("ferb-user-proxy", "goal text"),
+            make_post("ferb-reviewer", r#"{"type":"summary","content":"refined"}"#),
+        ];
+        let ctx = build_thread_context(&posts);
+        assert!(ctx.contains("[ferb-user-proxy]"));
+        assert!(ctx.contains("[ferb-reviewer]"));
+    }
 }

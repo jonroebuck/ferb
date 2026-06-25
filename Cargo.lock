@@ -547,6 +547,8 @@ dependencies = [
  "async-trait",
  "ferb-agent-core",
  "ferb-core",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 

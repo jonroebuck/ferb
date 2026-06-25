@@ -43,12 +43,15 @@ pub struct ThreadResponse {
 
 #[derive(Debug, Serialize)]
 struct CreatePostRequest {
+    author: String,
     content: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PostResponse {
     pub id: String,
+    #[serde(default)]
+    pub author: String,
     pub content: String,
     pub timestamp: String,
 }
@@ -150,6 +153,7 @@ impl SwitchboardClient {
         &self,
         channel_id: &str,
         thread_id: &str,
+        author: &str,
         content: &str,
     ) -> anyhow::Result<PostResponse> {
         let url = format!(
@@ -157,6 +161,7 @@ impl SwitchboardClient {
             self.base_url, channel_id, thread_id
         );
         let body = CreatePostRequest {
+            author: author.to_string(),
             content: content.to_string(),
         };
         let resp = self.http.post(&url).json(&body).send().await?;
@@ -164,6 +169,28 @@ impl SwitchboardClient {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard post_to_thread error ({}): {}", status, text);
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn list_thread_posts(
+        &self,
+        channel_id: &str,
+        thread_id: &str,
+    ) -> anyhow::Result<Vec<PostResponse>> {
+        let url = format!(
+            "{}/api/channels/{}/threads/{}/posts",
+            self.base_url, channel_id, thread_id
+        );
+        let resp = self.http.get(&url).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Switchboard list_thread_posts error ({}): {}",
+                status,
+                text
+            );
         }
         Ok(resp.json().await?)
     }

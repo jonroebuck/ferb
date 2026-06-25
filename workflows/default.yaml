@@ -1,15 +1,17 @@
 workflow: default
 tasks:
-  # Goal phase
+  # Goal phase — define-goal runs as an interactive conversation via Switchboard.
+  # ferb-user-proxy drives stdin; ferb-reviewer posts to the define-goal thread.
+  # run.rs pre-completes this card before the pipeline loop starts.
   - id: define-goal
     name: Define Goal
-    agent: ferb-reviewer
-    prompt: analyst.md
+    agent: ferb-user-proxy
+    prompt: define-goal-reviewer.md
     status: pending
     inputs: []
     reviews: ~
     approves: ~
-    max_iterations: 5
+    max_iterations: 10
     success_criteria:
       - Goal description is clear and unambiguous
       - Artifact type is explicitly specified
