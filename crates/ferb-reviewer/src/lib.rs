@@ -22,7 +22,9 @@ fn load_prompt(filename: &str) -> anyhow::Result<String> {
 
 #[derive(Debug, Deserialize)]
 struct ReviewerResponse {
-    pub kanban_update: KanbanUpdate,
+    #[serde(default)]
+    pub kanban_update: Option<KanbanUpdate>,
+    #[serde(default)]
     pub artifacts: Option<serde_json::Value>,
 }
 
@@ -97,21 +99,23 @@ impl Reviewer {
         let raw = self.tramway.complete(&system_prompt, &context).await?;
         let response: ReviewerResponse = ferb_utils::parse_json(&raw)?;
 
-        let new_status = match response.kanban_update.status.as_str() {
-            "ready_for_review" => TaskStatus::ReadyForReview,
-            "done" => TaskStatus::Done,
-            "in_progress" => TaskStatus::InProgress,
-            _ => TaskStatus::InProgress,
-        };
+        if let Some(update) = &response.kanban_update {
+            let new_status = match update.status.as_str() {
+                "ready_for_review" => TaskStatus::ReadyForReview,
+                "done" => TaskStatus::Done,
+                "in_progress" => TaskStatus::InProgress,
+                _ => TaskStatus::InProgress,
+            };
 
-        if let Some(t) = state.kanban_board.get_task_mut(task_id) {
-            t.status = new_status;
-            if let Some(comment) = response.kanban_update.comment {
-                t.comments.push(KanbanComment {
-                    from: task_id.to_string(),
-                    content: comment,
-                    pass: state.pass,
-                });
+            if let Some(t) = state.kanban_board.get_task_mut(task_id) {
+                t.status = new_status;
+                if let Some(comment) = &update.comment {
+                    t.comments.push(KanbanComment {
+                        from: task_id.to_string(),
+                        content: comment.clone(),
+                        pass: state.pass,
+                    });
+                }
             }
         }
 
@@ -176,7 +180,11 @@ impl FerbAgent for Reviewer {
         let raw = self.tramway.complete(&system_prompt, &context).await?;
         let response: ReviewerResponse = ferb_utils::parse_json(&raw)?;
 
-        let done = response.kanban_update.status == "done";
+        let done = response
+            .kanban_update
+            .as_ref()
+            .map(|u| u.status == "done")
+            .unwrap_or(false);
         let mut artifacts = vec![];
         if let Some(serde_json::Value::Object(map)) = response.artifacts {
             for (key, value) in map {
@@ -196,7 +204,7 @@ impl FerbAgent for Reviewer {
             artifacts,
             message: response
                 .kanban_update
-                .comment
+                .and_then(|u| u.comment)
                 .unwrap_or_default(),
         })
     }

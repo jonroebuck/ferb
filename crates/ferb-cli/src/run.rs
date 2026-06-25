@@ -7,7 +7,23 @@ use ferb_reviewer::Reviewer;
 use ferb_user_proxy::UserProxy;
 use ferb_worker::Worker;
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn expand_tilde(path: &str) -> PathBuf {
+    if path.starts_with("~/") || path == "~" {
+        let home = if cfg!(windows) {
+            std::env::var("USERPROFILE")
+                .or_else(|_| std::env::var("HOMEPATH"))
+                .unwrap_or_else(|_| "C:\\Users\\Default".to_string())
+        } else {
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
+        };
+        PathBuf::from(home).join(&path[2..])
+    } else {
+        PathBuf::from(path)
+    }
+}
 
 use crate::FerbConfig;
 
@@ -332,11 +348,13 @@ pub async fn run_task(
     let worker = Worker::new(sb_url, tw_url, model);
     let approver = Approver::new(sb_url);
 
-    let wf_path = workflow_path
+    let wf_raw = workflow_path
         .map(String::from)
         .or_else(|| std::env::var("FERB_WORKFLOW").ok())
         .unwrap_or_else(|| config.workflow.default.clone());
-    let kanban_board = load_workflow(&wf_path)?;
+    let wf_path = expand_tilde(&wf_raw);
+    let wf_path_str = wf_path.to_string_lossy();
+    let kanban_board = load_workflow(&wf_path_str)?;
 
     let mut state = FerbState::new(kanban_board);
     state.send_message("user", "ferb-reviewer", "define-goal", goal);

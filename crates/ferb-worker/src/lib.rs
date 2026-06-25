@@ -22,9 +22,12 @@ fn load_prompt(filename: &str) -> anyhow::Result<String> {
 
 #[derive(Debug, Deserialize)]
 struct WorkerResponse {
-    pub artifacts: serde_json::Value,
+    #[serde(default)]
+    pub artifacts: Option<serde_json::Value>,
+    #[serde(default)]
     pub comment: Option<String>,
-    pub status: String,
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 pub struct Worker {
@@ -91,15 +94,15 @@ impl Worker {
         let raw = self.tramway.complete(&system_prompt, &context).await?;
         let response: WorkerResponse = ferb_utils::parse_json(&raw)?;
 
-        if let serde_json::Value::Object(map) = &response.artifacts {
+        if let Some(serde_json::Value::Object(map)) = &response.artifacts {
             for (key, value) in map {
                 state.set_artifact(key, value.clone());
             }
         }
 
-        let new_status = match response.status.as_str() {
-            "ready_for_review" => TaskStatus::ReadyForReview,
-            "failed" => TaskStatus::Failed,
+        let new_status = match response.status.as_deref() {
+            Some("ready_for_review") => TaskStatus::ReadyForReview,
+            Some("failed") => TaskStatus::Failed,
             _ => TaskStatus::ReadyForReview,
         };
 
@@ -173,9 +176,9 @@ impl FerbAgent for Worker {
         let raw = self.tramway.complete(&system_prompt, &context).await?;
         let response: WorkerResponse = ferb_utils::parse_json(&raw)?;
 
-        let done = response.status == "ready_for_review";
+        let done = response.status.as_deref() == Some("ready_for_review");
         let mut artifacts = vec![];
-        if let serde_json::Value::Object(map) = &response.artifacts {
+        if let Some(serde_json::Value::Object(map)) = &response.artifacts {
             for (key, value) in map {
                 artifacts.push(ArtifactEntry {
                     name: key.clone(),
