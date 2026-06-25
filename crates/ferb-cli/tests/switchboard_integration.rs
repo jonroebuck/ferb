@@ -23,7 +23,7 @@ async fn test_run_start_creates_issue_and_channel() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path("/api/issues"))
+        .and(path("/api/v1/issues"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-1", "my task", "backlog")),
         )
@@ -32,7 +32,7 @@ async fn test_run_start_creates_issue_and_channel() {
         .await;
 
     Mock::given(method("POST"))
-        .and(path("/api/channels"))
+        .and(path("/api/v1/channels"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(channel_json("ch-1", "ferb-123-my-task")),
@@ -42,7 +42,7 @@ async fn test_run_start_creates_issue_and_channel() {
         .await;
 
     Mock::given(method("PATCH"))
-        .and(path("/api/issues/iss-1"))
+        .and(path("/api/v1/issues/iss-1"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(issue_json("iss-1", "my task", "in_progress")),
@@ -52,7 +52,7 @@ async fn test_run_start_creates_issue_and_channel() {
         .await;
 
     Mock::given(method("POST"))
-        .and(path("/api/channels/ch-1/threads"))
+        .and(path("/api/v1/channels/ch-1/threads"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(thread_json("th-1", "Ferb run started: my task")),
@@ -88,7 +88,7 @@ async fn test_agent_completion_posted_to_channel() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path("/api/channels/ch-1/threads/th-1/posts"))
+        .and(path("/api/v1/channels/ch-1/threads/th-1/posts"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(post_json("post-1", "agent completed")),
@@ -111,7 +111,7 @@ async fn test_issue_transitions_to_done_on_success() {
     let server = MockServer::start().await;
 
     Mock::given(method("PATCH"))
-        .and(path("/api/issues/iss-1"))
+        .and(path("/api/v1/issues/iss-1"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-1", "my task", "done")),
         )
@@ -130,7 +130,7 @@ async fn test_issue_transitions_to_blocked_on_failure() {
     let server = MockServer::start().await;
 
     Mock::given(method("PATCH"))
-        .and(path("/api/issues/iss-1"))
+        .and(path("/api/v1/issues/iss-1"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-1", "my task", "blocked")),
         )
@@ -149,7 +149,7 @@ async fn test_channel_flag_reuses_existing_channel() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path("/api/issues"))
+        .and(path("/api/v1/issues"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-2", "resume task", "backlog")),
         )
@@ -161,7 +161,7 @@ async fn test_channel_flag_reuses_existing_channel() {
     // which would cause an error.
 
     Mock::given(method("PATCH"))
-        .and(path("/api/issues/iss-2"))
+        .and(path("/api/v1/issues/iss-2"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(issue_json("iss-2", "resume task", "in_progress")),
@@ -171,7 +171,7 @@ async fn test_channel_flag_reuses_existing_channel() {
         .await;
 
     Mock::given(method("POST"))
-        .and(path("/api/channels/existing-ch/threads"))
+        .and(path("/api/v1/channels/existing-ch/threads"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(thread_json("th-2", "Ferb run started: resume task")),
@@ -218,7 +218,7 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     // Start: create issue
     Mock::given(method("POST"))
-        .and(path("/api/issues"))
+        .and(path("/api/v1/issues"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-3", "full test", "backlog")),
         )
@@ -227,7 +227,7 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     // Start: create channel
     Mock::given(method("POST"))
-        .and(path("/api/channels"))
+        .and(path("/api/v1/channels"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(channel_json("ch-3", "ferb-999-full-test")),
@@ -237,7 +237,7 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     // Start: transition to in_progress, then later to done
     Mock::given(method("PATCH"))
-        .and(path("/api/issues/iss-3"))
+        .and(path("/api/v1/issues/iss-3"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-3", "full test", "done")),
         )
@@ -246,7 +246,7 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     // Start: create thread
     Mock::given(method("POST"))
-        .and(path("/api/channels/ch-3/threads"))
+        .and(path("/api/v1/channels/ch-3/threads"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(thread_json("th-3", "Ferb run started: full test")),
@@ -256,7 +256,7 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     // Agent completions + final summary: post to thread
     Mock::given(method("POST"))
-        .and(path("/api/channels/ch-3/threads/th-3/posts"))
+        .and(path("/api/v1/channels/ch-3/threads/th-3/posts"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(post_json("post-x", "update")),
         )

@@ -131,7 +131,7 @@ impl SwitchboardClient {
     }
 
     pub async fn get_issue(&self, card_id: Uuid) -> anyhow::Result<Issue> {
-        let url = format!("{}/api/issues/{}", self.base_url, card_id);
+        let url = format!("{}/api/v1/issues/{}", self.base_url, card_id);
         let resp = self.http.get(&url).send().await?;
         if !resp.status().is_success() {
             anyhow::bail!("GET {} failed: {}", url, resp.status());
@@ -144,7 +144,7 @@ impl SwitchboardClient {
         card_id: Uuid,
         status: &IssueStatus,
     ) -> anyhow::Result<IssueEvent> {
-        let url = format!("{}/api/issues/{}", self.base_url, card_id);
+        let url = format!("{}/api/v1/issues/{}", self.base_url, card_id);
         let body = serde_json::json!({ "status": status });
         let resp = self.http.patch(&url).json(&body).send().await?;
         if !resp.status().is_success() {
@@ -159,7 +159,7 @@ impl SwitchboardClient {
         agent: &str,
         comment: &str,
     ) -> anyhow::Result<IssueEvent> {
-        let url = format!("{}/api/issues/{}/comments", self.base_url, card_id);
+        let url = format!("{}/api/v1/issues/{}/comments", self.base_url, card_id);
         let body = serde_json::json!({ "agent": agent, "content": comment });
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
@@ -169,7 +169,7 @@ impl SwitchboardClient {
     }
 
     pub async fn list_questions(&self, card_id: Uuid) -> anyhow::Result<Vec<Question>> {
-        let url = format!("{}/api/issues/{}/questions", self.base_url, card_id);
+        let url = format!("{}/api/v1/issues/{}/questions", self.base_url, card_id);
         let resp = self.http.get(&url).send().await?;
         if !resp.status().is_success() {
             anyhow::bail!("GET {} failed: {}", url, resp.status());
@@ -183,7 +183,7 @@ impl SwitchboardClient {
         text: &str,
         asked_by: &str,
     ) -> anyhow::Result<Question> {
-        let url = format!("{}/api/issues/{}/questions", self.base_url, card_id);
+        let url = format!("{}/api/v1/issues/{}/questions", self.base_url, card_id);
         let body = serde_json::json!({ "text": text, "asked_by": asked_by });
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
@@ -200,7 +200,7 @@ impl SwitchboardClient {
         answered_by: &str,
     ) -> anyhow::Result<()> {
         let url = format!(
-            "{}/api/issues/{}/questions/{}/answers",
+            "{}/api/v1/issues/{}/questions/{}/answers",
             self.base_url, card_id, question_id
         );
         let body = serde_json::json!({ "text": answer, "answered_by": answered_by });
@@ -212,7 +212,7 @@ impl SwitchboardClient {
     }
 
     pub async fn get_channel(&self, channel_id: Uuid) -> anyhow::Result<Channel> {
-        let url = format!("{}/api/channels/{}", self.base_url, channel_id);
+        let url = format!("{}/api/v1/channels/{}", self.base_url, channel_id);
         let resp = self.http.get(&url).send().await?;
         if !resp.status().is_success() {
             anyhow::bail!("GET {} failed: {}", url, resp.status());
@@ -221,7 +221,7 @@ impl SwitchboardClient {
     }
 
     pub async fn create_channel(&self, name: &str) -> anyhow::Result<Channel> {
-        let url = format!("{}/api/channels", self.base_url);
+        let url = format!("{}/api/v1/channels", self.base_url);
         let body = serde_json::json!({ "name": name });
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
@@ -235,7 +235,7 @@ impl SwitchboardClient {
         channel_id: Uuid,
         title: &str,
     ) -> anyhow::Result<Thread> {
-        let url = format!("{}/api/channels/{}/threads", self.base_url, channel_id);
+        let url = format!("{}/api/v1/channels/{}/threads", self.base_url, channel_id);
         let body = serde_json::json!({ "title": title });
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
@@ -250,7 +250,7 @@ impl SwitchboardClient {
         author: &str,
         content: &str,
     ) -> anyhow::Result<Post> {
-        let url = format!("{}/api/threads/{}/posts", self.base_url, thread_id);
+        let url = format!("{}/api/v1/threads/{}/posts", self.base_url, thread_id);
         let body = serde_json::json!({ "author": author, "content": content });
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
@@ -260,7 +260,7 @@ impl SwitchboardClient {
     }
 
     pub async fn list_thread_posts(&self, thread_id: Uuid) -> anyhow::Result<Vec<Post>> {
-        let url = format!("{}/api/threads/{}/posts", self.base_url, thread_id);
+        let url = format!("{}/api/v1/threads/{}/posts", self.base_url, thread_id);
         let resp = self.http.get(&url).send().await?;
         if !resp.status().is_success() {
             anyhow::bail!("GET {} failed: {}", url, resp.status());
@@ -273,7 +273,7 @@ impl SwitchboardClient {
         title: &str,
         agents: &[String],
     ) -> anyhow::Result<Issue> {
-        let url = format!("{}/api/issues", self.base_url);
+        let url = format!("{}/api/v1/issues", self.base_url);
         let body = serde_json::json!({
             "title": title,
             "status": "backlog",

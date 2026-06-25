@@ -79,7 +79,7 @@ async fn test_get_card() {
     let id = test_uuid();
 
     Mock::given(method("GET"))
-        .and(path(format!("/api/issues/{}", id)))
+        .and(path(format!("/api/v1/issues/{}", id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": id,
             "title": "test card",
@@ -104,7 +104,7 @@ async fn test_update_card_status() {
     let event_id: Uuid = "660e8400-e29b-41d4-a716-446655440001".parse().unwrap();
 
     Mock::given(method("PATCH"))
-        .and(path(format!("/api/issues/{}", id)))
+        .and(path(format!("/api/v1/issues/{}", id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": event_id,
             "issue_id": id,
@@ -131,7 +131,7 @@ async fn test_post_card_comment() {
     let event_id: Uuid = "770e8400-e29b-41d4-a716-446655440002".parse().unwrap();
 
     Mock::given(method("POST"))
-        .and(path(format!("/api/issues/{}/comments", id)))
+        .and(path(format!("/api/v1/issues/{}/comments", id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": event_id,
             "issue_id": id,
@@ -158,7 +158,7 @@ async fn test_list_card_questions() {
     let q_id: Uuid = "880e8400-e29b-41d4-a716-446655440003".parse().unwrap();
 
     Mock::given(method("GET"))
-        .and(path(format!("/api/issues/{}/questions", id)))
+        .and(path(format!("/api/v1/issues/{}/questions", id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             {
                 "id": q_id,
@@ -186,7 +186,7 @@ async fn test_post_question() {
     let q_id: Uuid = "990e8400-e29b-41d4-a716-446655440004".parse().unwrap();
 
     Mock::given(method("POST"))
-        .and(path(format!("/api/issues/{}/questions", id)))
+        .and(path(format!("/api/v1/issues/{}/questions", id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": q_id,
             "text": "What framework?",
@@ -211,7 +211,7 @@ async fn test_answer_question() {
     let q_id: Uuid = "aa0e8400-e29b-41d4-a716-446655440005".parse().unwrap();
 
     Mock::given(method("POST"))
-        .and(path(format!("/api/issues/{}/questions/{}/answers", id, q_id)))
+        .and(path(format!("/api/v1/issues/{}/questions/{}/answers", id, q_id)))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
         .mount(&server)
@@ -231,7 +231,7 @@ async fn test_create_channel_and_thread() {
     let th_id: Uuid = "bb0e8400-e29b-41d4-a716-446655440006".parse().unwrap();
 
     Mock::given(method("POST"))
-        .and(path("/api/channels"))
+        .and(path("/api/v1/channels"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": ch_id,
             "name": "general",
@@ -242,7 +242,7 @@ async fn test_create_channel_and_thread() {
         .await;
 
     Mock::given(method("POST"))
-        .and(path(format!("/api/channels/{}/threads", ch_id)))
+        .and(path(format!("/api/v1/channels/{}/threads", ch_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": th_id,
             "channel_id": ch_id,
@@ -268,7 +268,7 @@ async fn test_post_to_thread_and_list() {
     let post_id: Uuid = "cc0e8400-e29b-41d4-a716-446655440007".parse().unwrap();
 
     Mock::given(method("POST"))
-        .and(path(format!("/api/threads/{}/posts", th_id)))
+        .and(path(format!("/api/v1/threads/{}/posts", th_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": post_id,
             "thread_id": th_id,
@@ -281,7 +281,7 @@ async fn test_post_to_thread_and_list() {
         .await;
 
     Mock::given(method("GET"))
-        .and(path(format!("/api/threads/{}/posts", th_id)))
+        .and(path(format!("/api/v1/threads/{}/posts", th_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             {
                 "id": post_id,
@@ -314,7 +314,7 @@ async fn test_create_issue_with_agents() {
     let id = test_uuid();
 
     Mock::given(method("POST"))
-        .and(path("/api/issues"))
+        .and(path("/api/v1/issues"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": id,
             "title": "define-goal",

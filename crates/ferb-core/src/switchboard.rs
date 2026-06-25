@@ -81,7 +81,7 @@ impl SwitchboardClient {
         title: &str,
         status: &str,
     ) -> anyhow::Result<IssueResponse> {
-        let url = format!("{}/api/issues", self.base_url);
+        let url = format!("{}/api/v1/issues", self.base_url);
         let body = CreateIssueRequest {
             title: title.to_string(),
             status: status.to_string(),
@@ -100,7 +100,7 @@ impl SwitchboardClient {
         issue_id: &str,
         status: &str,
     ) -> anyhow::Result<IssueResponse> {
-        let url = format!("{}/api/issues/{}", self.base_url, issue_id);
+        let url = format!("{}/api/v1/issues/{}", self.base_url, issue_id);
         let body = UpdateIssueRequest {
             status: status.to_string(),
         };
@@ -118,7 +118,7 @@ impl SwitchboardClient {
     }
 
     pub async fn create_channel(&self, name: &str) -> anyhow::Result<ChannelResponse> {
-        let url = format!("{}/api/channels", self.base_url);
+        let url = format!("{}/api/v1/channels", self.base_url);
         let body = CreateChannelRequest {
             name: name.to_string(),
         };
@@ -136,7 +136,7 @@ impl SwitchboardClient {
         channel_id: &str,
         content: &str,
     ) -> anyhow::Result<ThreadResponse> {
-        let url = format!("{}/api/channels/{}/threads", self.base_url, channel_id);
+        let url = format!("{}/api/v1/channels/{}/threads", self.base_url, channel_id);
         let body = CreateThreadRequest {
             content: content.to_string(),
         };
@@ -157,7 +157,7 @@ impl SwitchboardClient {
         content: &str,
     ) -> anyhow::Result<PostResponse> {
         let url = format!(
-            "{}/api/channels/{}/threads/{}/posts",
+            "{}/api/v1/channels/{}/threads/{}/posts",
             self.base_url, channel_id, thread_id
         );
         let body = CreatePostRequest {
@@ -179,7 +179,7 @@ impl SwitchboardClient {
         thread_id: &str,
     ) -> anyhow::Result<Vec<PostResponse>> {
         let url = format!(
-            "{}/api/channels/{}/threads/{}/posts",
+            "{}/api/v1/channels/{}/threads/{}/posts",
             self.base_url, channel_id, thread_id
         );
         let resp = self.http.get(&url).send().await?;
