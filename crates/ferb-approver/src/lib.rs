@@ -7,7 +7,7 @@ impl Approver {
     /// Conditions:
     /// 1. The target task (approves field) is ReadyForReview
     /// 2. All reviewer tasks that review the target are Done
-    /// If both true -> set target to Done, set own task to Done
+    ///    If both true -> set target to Done, set own task to Done
     pub fn run(&self, state: &mut FerbState, task_id: &str) {
         let target_id = match state.kanban_board.get_task(task_id) {
             Some(t) => match &t.approves {

@@ -104,11 +104,9 @@ impl Reviewer {
             }
         }
 
-        if let Some(artifacts) = response.artifacts {
-            if let serde_json::Value::Object(map) = artifacts {
-                for (key, value) in map {
-                    state.set_artifact(&key, value);
-                }
+        if let Some(serde_json::Value::Object(map)) = response.artifacts {
+            for (key, value) in map {
+                state.set_artifact(&key, value);
             }
         }
 
