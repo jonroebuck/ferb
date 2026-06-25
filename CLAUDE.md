@@ -21,14 +21,14 @@ cargo run -p ferb-cli -- "goal"    # run the pipeline
 
 Cargo workspace with 8 crates under `crates/`:
 
-- **ferb-core** — Shared types (FerbState, KanbanBoard, KanbanTask, ChannelMessage, etc.) and TramwayClient (reqwest-based, talks to OpenAI-compatible API). Model set via `FERB_MODEL` env var, defaults to `claude-sonnet-4-6`.
+- **ferb-core** — Shared types (FerbState, KanbanBoard, KanbanTask, ChannelMessage, etc.), TramwayClient (reqwest-based, talks to OpenAI-compatible API), and SwitchboardClient (issue tracking + channel messaging). Model set via `FERB_MODEL` env var, defaults to `claude-sonnet-4-6`.
 - **ferb-utils** — JSON parsing helpers: `clean_json()` strips markdown fences, `parse_json<T>()` cleans + sanitizes + deserializes with descriptive errors.
 - **ferb-moderator** — Reconciles the message channel against the kanban board. Extracts questions from agent messages, matches user replies to unanswered questions.
 - **ferb-user-proxy** — Handles stdin/stdout interaction. Prints messages directed to "user" and collects responses.
 - **ferb-approver** — Gate agent. Marks a target task as Done when all its reviewers are Done and the target is ReadyForReview.
 - **ferb-reviewer** — LLM-powered review agent. Loads a prompt file, builds context from kanban state + artifacts, calls Tramway, updates kanban status and message channel.
 - **ferb-worker** — LLM-powered production agent. One-shot artifact generation. Loads prompt, calls Tramway, stores artifacts, sets task to ReadyForReview.
-- **ferb-cli** — Entry point. Loads a YAML workflow (`FERB_WORKFLOW`, defaults to `workflows/default.yaml`), initializes FerbState, runs the main pass loop (moderator → user proxy → agents).
+- **ferb-cli** — Entry point. Loads a YAML workflow (`FERB_WORKFLOW`, defaults to `workflows/default.yaml`), initializes FerbState, runs the main pass loop (moderator → user proxy → agents). Integrates with Switchboard for issue tracking and channel messaging (best-effort). Supports `--channel <id>` to resume posting to an existing channel.
 
 ## Key Concepts
 
@@ -41,6 +41,7 @@ Cargo workspace with 8 crates under `crates/`:
 ## Environment Variables
 
 - `TRAMWAY_URL` — LLM API base URL (default: `http://localhost:8080`)
+- `SWITCHBOARD_URL` — Switchboard API base URL for issue tracking and messaging (default: `http://localhost:8080`)
 - `FERB_MODEL` — Model name for Tramway requests (default: `claude-sonnet-4-6`)
 - `FERB_PROMPTS_DIR` — Directory containing `.md` prompt files (default: `./prompts`)
 - `FERB_WORKFLOW` — Path to workflow YAML file (default: `workflows/default.yaml`)

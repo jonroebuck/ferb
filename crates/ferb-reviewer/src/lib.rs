@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use ferb_core::{ChannelMessage, FerbState, KanbanComment, TaskStatus};
+use ferb_core::{FerbState, KanbanComment, TaskStatus};
 use serde::Deserialize;
 
 fn prompts_dir() -> PathBuf {
@@ -16,16 +16,8 @@ fn load_prompt(filename: &str) -> anyhow::Result<String> {
 
 #[derive(Debug, Deserialize)]
 struct ReviewerResponse {
-    pub message_channel: Vec<ReviewerMessage>,
     pub kanban_update: KanbanUpdate,
     pub artifacts: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReviewerMessage {
-    pub to: String,
-    pub task: String,
-    pub content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,15 +85,6 @@ impl Reviewer {
 
         let raw = client.complete(&system_prompt, &context).await?;
         let response: ReviewerResponse = ferb_utils::parse_json(&raw)?;
-
-        for msg in &response.message_channel {
-            state.message_channel.push(ChannelMessage {
-                from: task_id.to_string(),
-                to: msg.to.clone(),
-                task: msg.task.clone(),
-                content: msg.content.clone(),
-            });
-        }
 
         let new_status = match response.kanban_update.status.as_str() {
             "ready_for_review" => TaskStatus::ReadyForReview,
@@ -171,21 +154,6 @@ fn build_context(state: &FerbState, task_id: &str) -> String {
         ctx.push_str("## Previous Comments\n");
         for c in &task.comments {
             ctx.push_str(&format!("[{}] {}\n", c.from, c.content));
-        }
-    }
-
-    let all_for_task: Vec<_> = state
-        .message_channel
-        .iter()
-        .filter(|m| m.task == task_id)
-        .collect();
-    let skip = all_for_task.len().saturating_sub(10);
-    let recent: Vec<_> = all_for_task.into_iter().skip(skip).collect();
-
-    if !recent.is_empty() {
-        ctx.push_str("\n## Recent Messages\n");
-        for msg in recent {
-            ctx.push_str(&format!("[{}->{}] {}\n", msg.from, msg.to, msg.content));
         }
     }
 
