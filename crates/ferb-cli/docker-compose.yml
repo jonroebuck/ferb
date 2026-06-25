@@ -1,0 +1,40 @@
+services:
+  klondike:
+    image: ghcr.io/jonroebuck/klondike:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - klondike-data:/data
+
+  tramway:
+    image: ghcr.io/jonroebuck/tramway:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - TRAMWAY_PORT=8080
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+  switchboard:
+    image: ghcr.io/jonroebuck/switchboard:latest
+    ports:
+      - "4080:4080"
+    environment:
+      - KLONDIKE_URL=http://klondike:3000
+    depends_on:
+      - klondike
+
+  ferb:
+    image: ghcr.io/jonroebuck/ferb:latest
+    ports:
+      - "9090:9090"
+    environment:
+      - SWITCHBOARD_URL=http://switchboard:4080
+      - TRAMWAY_URL=http://tramway:8080
+    depends_on:
+      - switchboard
+      - tramway
+
+volumes:
+  klondike-data:
