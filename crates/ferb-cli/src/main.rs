@@ -95,7 +95,7 @@ pub(crate) fn load_config() -> anyhow::Result<FerbConfig> {
         .set_default("server.port", 9090)?
         .set_default("switchboard.url", "http://localhost:4080")?
         .set_default("tramway.url", "http://localhost:8080")?
-        .set_default("tramway.model", "claude-sonnet-4-6")?
+        .set_default("tramway.model", "claude/claude-sonnet-4-6")?
         .add_source(config::File::from(ferb_dir().join("ferb.toml")).required(false))
         .set_override_option("switchboard.url", std::env::var("SWITCHBOARD_URL").ok())?
         .set_override_option("tramway.url", std::env::var("TRAMWAY_URL").ok())?

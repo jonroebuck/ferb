@@ -140,60 +140,68 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
 
     ensure_compose_file(ferb_dir)?;
 
-    let anthropic_key = if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-        println!("ANTHROPIC_API_KEY: (using environment variable)");
-        key
-    } else {
-        let key = prompt("ANTHROPIC_API_KEY", "")?;
-        if key.is_empty() {
-            anyhow::bail!("ANTHROPIC_API_KEY is required");
+    let toml_path = ferb_dir.join("ferb.toml");
+    let first_run = !toml_path.exists();
+
+    if first_run {
+        let anthropic_key = if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            println!("ANTHROPIC_API_KEY: (using environment variable)");
+            key
+        } else {
+            let key = prompt("ANTHROPIC_API_KEY", "")?;
+            if key.is_empty() {
+                anyhow::bail!("ANTHROPIC_API_KEY is required");
+            }
+            key
+        };
+
+        let openai_key = if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            println!("OPENAI_API_KEY: (using environment variable)");
+            key
+        } else {
+            prompt("OPENAI_API_KEY (optional, press Enter to skip)", "")?
+        };
+
+        let gemini_key = if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+            println!("GEMINI_API_KEY: (using environment variable)");
+            key
+        } else {
+            prompt("GEMINI_API_KEY (optional, press Enter to skip)", "")?
+        };
+
+        let switchboard_url = prompt("Switchboard URL", "http://localhost:4080")?;
+        let tramway_url = prompt("Tramway URL", "http://localhost:8080")?;
+
+        let config = crate::FerbToml {
+            server: crate::ServerToml { port: 9090 },
+            switchboard: crate::SwitchboardToml {
+                url: switchboard_url,
+            },
+            tramway: crate::TramwayToml {
+                url: tramway_url,
+                model: "claude/claude-sonnet-4-6".to_string(),
+            },
+        };
+        let toml_str = toml::to_string_pretty(&config)?;
+        std::fs::write(&toml_path, toml_str)?;
+
+        write_secret(ferb_dir, "ANTHROPIC_API_KEY", &anthropic_key)?;
+        if !openai_key.is_empty() {
+            write_secret(ferb_dir, "OPENAI_API_KEY", &openai_key)?;
         }
-        key
-    };
-
-    let openai_key = if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-        println!("OPENAI_API_KEY: (using environment variable)");
-        key
+        if !gemini_key.is_empty() {
+            write_secret(ferb_dir, "GEMINI_API_KEY", &gemini_key)?;
+        }
     } else {
-        prompt("OPENAI_API_KEY (optional, press Enter to skip)", "")?
-    };
-
-    let gemini_key = if let Ok(key) = std::env::var("GEMINI_API_KEY") {
-        println!("GEMINI_API_KEY: (using environment variable)");
-        key
-    } else {
-        prompt("GEMINI_API_KEY (optional, press Enter to skip)", "")?
-    };
-
-    let switchboard_url = prompt("Switchboard URL", "http://localhost:4080")?;
-    let tramway_url = prompt("Tramway URL", "http://localhost:8080")?;
-
-    let config = crate::FerbToml {
-        server: crate::ServerToml { port: 9090 },
-        switchboard: crate::SwitchboardToml {
-            url: switchboard_url.clone(),
-        },
-        tramway: crate::TramwayToml {
-            url: tramway_url,
-            model: "claude-sonnet-4-6".to_string(),
-        },
-    };
-    let toml_str = toml::to_string_pretty(&config)?;
-    std::fs::write(ferb_dir.join("ferb.toml"), toml_str)?;
-
-    write_secret(ferb_dir, "ANTHROPIC_API_KEY", &anthropic_key)?;
-    if !openai_key.is_empty() {
-        write_secret(ferb_dir, "OPENAI_API_KEY", &openai_key)?;
-    }
-    if !gemini_key.is_empty() {
-        write_secret(ferb_dir, "GEMINI_API_KEY", &gemini_key)?;
+        println!("Config already exists at {}", toml_path.display());
     }
 
     docker_compose_up(ferb_dir)?;
     wait_for_services(ferb_dir)?;
 
+    let config = crate::load_config()?;
     println!("\nFerb is ready!");
-    println!("Switchboard: {}", switchboard_url);
+    println!("Switchboard: {}", config.switchboard.url);
 
     Ok(())
 }

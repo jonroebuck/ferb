@@ -25,7 +25,7 @@ cargo run -p ferb-cli -- status    # show running containers and config
 
 Cargo workspace with 8 crates under `crates/`:
 
-- **ferb-core** — Shared types (FerbState, KanbanBoard, KanbanTask, ChannelMessage, etc.), TramwayClient (reqwest-based, talks to OpenAI-compatible API), and SwitchboardClient (issue tracking + channel messaging). Model set via `FERB_MODEL` env var, defaults to `claude-sonnet-4-6`.
+- **ferb-core** — Shared types (FerbState, KanbanBoard, KanbanTask, ChannelMessage, etc.), TramwayClient (reqwest-based, talks to OpenAI-compatible API), and SwitchboardClient (issue tracking + channel messaging). Model set via `FERB_MODEL` env var, defaults to `claude/claude-sonnet-4-6`.
 - **ferb-utils** — JSON parsing helpers: `clean_json()` strips markdown fences, `parse_json<T>()` cleans + sanitizes + deserializes with descriptive errors.
 - **ferb-moderator** — Reconciles the message channel against the kanban board. Extracts questions from agent messages, matches user replies to unanswered questions.
 - **ferb-user-proxy** — Handles stdin/stdout interaction. Prints messages directed to "user" and collects responses.
@@ -46,6 +46,6 @@ Cargo workspace with 8 crates under `crates/`:
 
 - `TRAMWAY_URL` — LLM API base URL (default: `http://localhost:8080`). Overrides `~/.ferb/ferb.toml`.
 - `SWITCHBOARD_URL` — Switchboard API base URL for issue tracking and messaging (default: `http://localhost:4080`). Overrides `~/.ferb/ferb.toml`.
-- `FERB_MODEL` — Model name for Tramway requests (default: `claude-sonnet-4-6`)
+- `FERB_MODEL` — Model name for Tramway requests (default: `claude/claude-sonnet-4-6`)
 - `FERB_PROMPTS_DIR` — Directory containing `.md` prompt files (default: `./prompts`)
 - `FERB_WORKFLOW` — Path to workflow YAML file (default: `workflows/default.yaml`)
