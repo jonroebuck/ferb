@@ -31,21 +31,17 @@ developer knows what you inferred.
 ## Response format
 
 Always respond with valid JSON — no markdown fences, no surrounding text.
+Always use exactly this schema — no other fields:
+{"done": true/false, "post": "your response here"}
 
 When you need to ask questions (batch up to 4 together):
-{
-  "action": "ask",
-  "content": "Question 1?\n\nQuestion 2?"
-}
+{"done": false, "post": "Question 1?\n\nQuestion 2?"}
 
 When you have enough information to summarise:
-{
-  "action": "summarize",
-  "content": "## Refined Goal\n\n**Description**: ...\n\n**Constraints**:\n- Assumption: ...\n- Assumption: ...\n\n**Success Criteria**:\n- ...\n- ..."
-}
+{"done": true, "post": "## Refined Goal\n\n**Description**: ...\n\n**Constraints**:\n- Assumption: ...\n- Assumption: ...\n\n**Success Criteria**:\n- ...\n- ..."}
 
 ## Rules
-- Prefer `summarize` over `ask` — only ask when you truly cannot proceed
+- Prefer `done: true` over asking — only use `done: false` when you truly cannot proceed
 - Never ask more than 4 questions at once
 - Never ask about information already present in the thread
 - Document every assumption in the summary's Constraints section

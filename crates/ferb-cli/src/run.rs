@@ -246,6 +246,48 @@ fn parse_labeled_post_content(content: &str) -> (String, String) {
     ("status".to_string(), content.to_string())
 }
 
+/// Post the initial goal to the define-goal thread.
+/// If the first attempt fails, recreates the thread and retries once.
+/// Returns the active thread_id (may differ from the input if a new thread was created).
+/// Returns an error if the goal cannot be posted — the reviewer must not run against an empty thread.
+async fn post_initial_goal_with_retry(
+    sb: &ferb_core::SwitchboardClient,
+    goal: &str,
+    state: &mut FerbState,
+    channel_id: &str,
+    thread_id: String,
+) -> anyhow::Result<String> {
+    if sb
+        .post_to_thread(channel_id, &thread_id, "ferb-user-proxy", goal)
+        .await
+        .is_ok()
+    {
+        return Ok(thread_id);
+    }
+
+    eprintln!("[warn] Initial post to define-goal thread failed, retrying with a fresh thread...");
+    let new_thread = sb
+        .create_thread(channel_id, &format!("Define Goal: {}", goal), "ferb-moderator")
+        .await
+        .map_err(|e| anyhow::anyhow!("Could not create define-goal thread on retry: {}", e))?;
+
+    state
+        .thread_ids
+        .insert("define-goal".to_string(), new_thread.id.clone());
+
+    sb.post_to_thread(channel_id, &new_thread.id, "ferb-user-proxy", goal)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to post goal to define-goal thread after retry: {}. \
+                 Aborting — the reviewer cannot run against an empty thread.",
+                e
+            )
+        })?;
+
+    Ok(new_thread.id)
+}
+
 /// Run the define-goal conversation between the reviewer and the user.
 ///
 /// - Creates a "general" Switchboard channel and a "define-goal" thread.
@@ -269,13 +311,9 @@ async fn run_define_goal_phase(
         }
     };
 
-    // Post the initial task description from the user.
-    if let Err(e) = sb
-        .post_to_thread(&channel_id, &thread_id, "ferb-user-proxy", goal)
-        .await
-    {
-        eprintln!("[warn] Failed to post initial goal to thread: {}", e);
-    }
+    // Post the initial task description — must succeed before the reviewer runs.
+    let thread_id =
+        post_initial_goal_with_retry(sb, goal, state, &channel_id, thread_id).await?;
 
     for _iteration in 0..MAX_DEFINE_GOAL_ITERATIONS {
         // Reviewer reads the thread and posts a question or refined-goal summary.
@@ -283,11 +321,11 @@ async fn run_define_goal_phase(
             .analyze_define_goal_thread(sb, &channel_id, &thread_id)
             .await
         {
-            Ok((action, content)) => {
-                let post_type = if action == "summarize" { "summary" } else { "question" };
+            Ok((done, post)) => {
+                let post_type = if done { "summary" } else { "question" };
                 let envelope = serde_json::json!({
                     "type": post_type,
-                    "content": content,
+                    "content": post,
                 })
                 .to_string();
 
@@ -296,10 +334,10 @@ async fn run_define_goal_phase(
                     .await
                     .map_err(|e| eprintln!("[warn] Failed to post reviewer response: {}", e));
 
-                println!("\n[ferb-reviewer]\n{}\n", content);
+                println!("\n[ferb-reviewer]\n{}\n", post);
 
-                if action == "summarize" {
-                    if handle_summary_confirmation(sb, &channel_id, &thread_id, state, goal, &content).await? {
+                if done {
+                    if handle_summary_confirmation(sb, &channel_id, &thread_id, state, goal, &post).await? {
                         return Ok(());
                     }
                 } else {

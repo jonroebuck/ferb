@@ -35,8 +35,8 @@ struct KanbanUpdate {
 
 #[derive(Debug, Deserialize)]
 struct DefineGoalLlmResponse {
-    pub action: String,
-    pub content: String,
+    pub done: bool,
+    pub post: String,
 }
 
 pub struct Reviewer {
@@ -125,14 +125,15 @@ impl Reviewer {
         Ok(())
     }
 
-    /// Analyze the define-goal thread history and return (action, content).
-    /// `action` is "ask" (has questions) or "summarize" (ready to confirm).
+    /// Analyze the define-goal thread history and return (done, post).
+    /// `done: true` means the reviewer has a refined-goal summary ready to confirm.
+    /// `done: false` means the reviewer has a question for the user.
     pub async fn analyze_define_goal_thread(
         &self,
         sb: &CoreSwitchboardClient,
         channel_id: &str,
         thread_id: &str,
-    ) -> anyhow::Result<(String, String)> {
+    ) -> anyhow::Result<(bool, String)> {
         let posts = sb
             .list_thread_posts(channel_id, thread_id)
             .await
@@ -150,7 +151,7 @@ impl Reviewer {
             )
         })?;
 
-        Ok((resp.action, resp.content))
+        Ok((resp.done, resp.post))
     }
 }
 
