@@ -1,9 +1,6 @@
 use async_trait::async_trait;
-use ferb_agent_core::{
-    AgentResponse, FerbAgent, HasSwitchboard, IssueStatus, KanbanAgent, SwitchboardClient,
-    ThreadAgent, Uuid,
-};
-use ferb_core::{FerbState, TramwayClient};
+use ferb_agent_core::{FerbAgent, SwitchboardClient, Uuid};
+use ferb_core::TramwayClient;
 
 pub struct MessageAdmin {
     sb: SwitchboardClient,
@@ -23,7 +20,7 @@ impl MessageAdmin {
         thread_id: Uuid,
         card_id: Uuid,
     ) -> anyhow::Result<String> {
-        let posts = self.sb.list_thread_posts(thread_id).await?;
+        let posts = self.sb.list_posts(thread_id).await?;
         if posts.is_empty() {
             return Ok("no_action".to_string());
         }
@@ -47,27 +44,12 @@ impl MessageAdmin {
 
         let action = response.trim().to_lowercase();
         if action.contains("transition") || action.contains("done") {
-            self.sb
-                .update_issue_status(card_id, &IssueStatus::Done)
-                .await
-                .ok();
+            self.sb.update_issue_status(card_id, "done").await.ok();
         }
 
         Ok(action)
     }
 }
-
-impl HasSwitchboard for MessageAdmin {
-    fn switchboard(&self) -> &SwitchboardClient {
-        &self.sb
-    }
-}
-
-#[async_trait]
-impl KanbanAgent for MessageAdmin {}
-
-#[async_trait]
-impl ThreadAgent for MessageAdmin {}
 
 #[async_trait]
 impl FerbAgent for MessageAdmin {
@@ -75,34 +57,55 @@ impl FerbAgent for MessageAdmin {
         "ferb-message-admin"
     }
 
-    async fn run(
-        &self,
-        card_id: Uuid,
-        _state: &FerbState,
-    ) -> anyhow::Result<AgentResponse> {
-        let card = self.get_card(card_id).await;
-        let all_done = if let Ok(card) = &card {
-            card.assigned_agents.iter().all(|_| true)
-        } else {
-            false
-        };
+    fn system_prompt(&self) -> &str {
+        "You are a message admin agent that monitors thread messages and manages workflow state. \
+         Read the thread history and determine if any workflow actions are needed. \
+         Action options: none, transition_done, transition_blocked. \
+         Respond with valid JSON only: {\"done\": true/false, \"post\": \"your status assessment and action taken\"}"
+    }
+}
 
-        let done = all_done && card.is_ok();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferb_agent_core::{CardContext, Issue, IssueStatus, Post};
+    use ferb_core::TramwayClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        let message = if done {
-            let card = card.unwrap();
-            format!("All agents on card '{}' have completed", card.title)
-        } else {
-            "Monitoring agent progress".to_string()
-        };
+    fn make_context() -> CardContext {
+        CardContext {
+            card: Issue {
+                id: "550e8400-e29b-41d4-a716-446655440000".parse().unwrap(),
+                title: "Monitor workflow state".to_string(),
+                status: IssueStatus::InProgress,
+            },
+            thread_id: "660e8400-e29b-41d4-a716-446655440001".parse().unwrap(),
+            channel_id: "770e8400-e29b-41d4-a716-446655440002".parse().unwrap(),
+            posts: vec![Post {
+                id: "880e8400-e29b-41d4-a716-446655440003".parse().unwrap(),
+                author: "ferb-reviewer".to_string(),
+                content: r#"{"done": true, "post": "All tasks complete."}"#.to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }],
+        }
+    }
 
-        Ok(AgentResponse {
-            done,
-            card_id: card_id.to_string(),
-            questions: vec![],
-            answers: vec![],
-            artifacts: vec![],
-            message,
-        })
+    #[tokio::test]
+    async fn test_run_returns_valid_agent_response() {
+        let tramway = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"done\": true, \"post\": \"All tasks complete. Transitioning to done.\"}"}}]
+            })))
+            .mount(&tramway)
+            .await;
+
+        let agent = MessageAdmin::new("http://127.0.0.1:1", &tramway.uri(), "test-model");
+        let tc = TramwayClient::new(&tramway.uri(), "test-model");
+        let resp = agent.run(make_context(), &tc).await.unwrap();
+        assert!(resp.done);
+        assert!(!resp.post.is_empty());
     }
 }

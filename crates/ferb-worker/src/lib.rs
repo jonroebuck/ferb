@@ -1,10 +1,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use ferb_agent_core::{
-    AgentResponse, ArtifactEntry, FerbAgent, HasSwitchboard, KanbanAgent, SwitchboardClient,
-    ThreadAgent, Uuid,
-};
+use ferb_agent_core::{FerbAgent, SwitchboardClient};
 use ferb_core::{FerbState, KanbanComment, TaskStatus, TramwayClient};
 use serde::Deserialize;
 
@@ -31,23 +28,19 @@ struct WorkerResponse {
 }
 
 pub struct Worker {
-    sb: SwitchboardClient,
+    _sb: SwitchboardClient,
     tramway: TramwayClient,
 }
 
 impl Worker {
     pub fn new(switchboard_url: &str, tramway_url: &str, model: &str) -> Self {
         Self {
-            sb: SwitchboardClient::new(switchboard_url),
+            _sb: SwitchboardClient::new(switchboard_url),
             tramway: TramwayClient::new(tramway_url, model),
         }
     }
 
-    pub async fn run_legacy(
-        &self,
-        state: &mut FerbState,
-        task_id: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn run_legacy(&self, state: &mut FerbState, task_id: &str) -> anyhow::Result<()> {
         let task = match state.kanban_board.get_task(task_id) {
             Some(t) => t.clone(),
             None => return Ok(()),
@@ -121,80 +114,61 @@ impl Worker {
     }
 }
 
-impl HasSwitchboard for Worker {
-    fn switchboard(&self) -> &SwitchboardClient {
-        &self.sb
-    }
-}
-
-#[async_trait]
-impl KanbanAgent for Worker {}
-
-#[async_trait]
-impl ThreadAgent for Worker {}
-
 #[async_trait]
 impl FerbAgent for Worker {
     fn agent_name(&self) -> &str {
         "ferb-worker"
     }
 
-    async fn run(
-        &self,
-        card_id: Uuid,
-        state: &FerbState,
-    ) -> anyhow::Result<AgentResponse> {
-        let task_id = card_id.to_string();
+    fn system_prompt(&self) -> &str {
+        "You are a worker agent that implements solutions to software tasks. \
+         Read the thread history and implement or continue the current task. \
+         Respond with valid JSON only: {\"done\": true/false, \"post\": \"your implementation notes or completed work\"}"
+    }
+}
 
-        let task = match state.kanban_board.get_task(&task_id) {
-            Some(t) => t.clone(),
-            None => return Ok(AgentResponse::noop(&task_id)),
-        };
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferb_agent_core::{CardContext, Issue, IssueStatus, Post};
 
-        if !state.kanban_board.inputs_done(&task) {
-            return Ok(AgentResponse::noop(&task_id));
+    use ferb_core::TramwayClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_context() -> CardContext {
+        CardContext {
+            card: Issue {
+                id: "550e8400-e29b-41d4-a716-446655440000".parse().unwrap(),
+                title: "Implement search feature".to_string(),
+                status: IssueStatus::InProgress,
+            },
+            thread_id: "660e8400-e29b-41d4-a716-446655440001".parse().unwrap(),
+            channel_id: "770e8400-e29b-41d4-a716-446655440002".parse().unwrap(),
+            posts: vec![Post {
+                id: "880e8400-e29b-41d4-a716-446655440003".parse().unwrap(),
+                author: "ferb-user-proxy".to_string(),
+                content: "Build a full-text search endpoint using Postgres.".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }],
         }
+    }
 
-        if matches!(task.status, TaskStatus::Done | TaskStatus::ReadyForReview) {
-            return Ok(AgentResponse::noop(&task_id));
-        }
+    #[tokio::test]
+    async fn test_run_returns_valid_agent_response() {
+        let tramway = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"done\": true, \"post\": \"Search endpoint implemented with tsvector indexing.\"}"}}]
+            })))
+            .mount(&tramway)
+            .await;
 
-        let prompt_file = task.prompt.as_deref().unwrap_or("worker.md");
-        let system_prompt = load_prompt(prompt_file)?;
-
-        let mut context = format!("## Task: {}\n\n", task.name);
-        for input_id in &task.inputs {
-            if let Some(artifact) = state.get_artifact(input_id) {
-                context.push_str(&format!(
-                    "### Input: {}\n{}\n\n",
-                    input_id,
-                    serde_json::to_string_pretty(artifact).unwrap_or_default()
-                ));
-            }
-        }
-
-        let raw = self.tramway.complete(&system_prompt, &context).await?;
-        let response: WorkerResponse = ferb_utils::parse_json(&raw)?;
-
-        let done = response.status.as_deref() == Some("ready_for_review");
-        let mut artifacts = vec![];
-        if let Some(serde_json::Value::Object(map)) = &response.artifacts {
-            for (key, value) in map {
-                artifacts.push(ArtifactEntry {
-                    name: key.clone(),
-                    content_type: "application/json".to_string(),
-                    content: serde_json::to_string(value).unwrap_or_default(),
-                });
-            }
-        }
-
-        Ok(AgentResponse {
-            done,
-            card_id: task_id,
-            questions: vec![],
-            answers: vec![],
-            artifacts,
-            message: response.comment.unwrap_or_default(),
-        })
+        let agent = Worker::new("http://127.0.0.1:1", &tramway.uri(), "test-model");
+        let tc = TramwayClient::new(&tramway.uri(), "test-model");
+        let resp = agent.run(make_context(), &tc).await.unwrap();
+        assert!(resp.done);
+        assert!(!resp.post.is_empty());
     }
 }

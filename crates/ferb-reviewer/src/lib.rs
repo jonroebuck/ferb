@@ -1,10 +1,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use ferb_agent_core::{
-    AgentResponse, ArtifactEntry, FerbAgent, HasSwitchboard, KanbanAgent, SwitchboardClient,
-    ThreadAgent, Uuid,
-};
+use ferb_agent_core::{FerbAgent, SwitchboardClient};
 use ferb_core::{FerbState, KanbanComment, SwitchboardClient as CoreSwitchboardClient, TaskStatus, TramwayClient};
 use serde::Deserialize;
 
@@ -43,23 +40,19 @@ struct DefineGoalLlmResponse {
 }
 
 pub struct Reviewer {
-    sb: SwitchboardClient,
+    _sb: SwitchboardClient,
     tramway: TramwayClient,
 }
 
 impl Reviewer {
     pub fn new(switchboard_url: &str, tramway_url: &str, model: &str) -> Self {
         Self {
-            sb: SwitchboardClient::new(switchboard_url),
+            _sb: SwitchboardClient::new(switchboard_url),
             tramway: TramwayClient::new(tramway_url, model),
         }
     }
 
-    pub async fn run_legacy(
-        &self,
-        state: &mut FerbState,
-        task_id: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn run_legacy(&self, state: &mut FerbState, task_id: &str) -> anyhow::Result<()> {
         let task = match state.kanban_board.get_task(task_id) {
             Some(t) => t.clone(),
             None => return Ok(()),
@@ -101,7 +94,6 @@ impl Reviewer {
         }
 
         let context = build_context(state, task_id);
-
         let raw = self.tramway.complete(&system_prompt, &context).await?;
         let response: ReviewerResponse = ferb_utils::parse_json(&raw)?;
 
@@ -112,7 +104,6 @@ impl Reviewer {
                 "in_progress" => TaskStatus::InProgress,
                 _ => TaskStatus::InProgress,
             };
-
             if let Some(t) = state.kanban_board.get_task_mut(task_id) {
                 t.status = new_status;
                 if let Some(comment) = &update.comment {
@@ -136,7 +127,6 @@ impl Reviewer {
 
     /// Analyze the define-goal thread history and return (action, content).
     /// `action` is "ask" (has questions) or "summarize" (ready to confirm).
-    /// `content` is the text to post to the thread.
     pub async fn analyze_define_goal_thread(
         &self,
         sb: &CoreSwitchboardClient,
@@ -182,98 +172,13 @@ fn extract_inner_content(content: &str) -> String {
     content.to_string()
 }
 
-impl HasSwitchboard for Reviewer {
-    fn switchboard(&self) -> &SwitchboardClient {
-        &self.sb
-    }
-}
-
-#[async_trait]
-impl KanbanAgent for Reviewer {}
-
-#[async_trait]
-impl ThreadAgent for Reviewer {}
-
-#[async_trait]
-impl FerbAgent for Reviewer {
-    fn agent_name(&self) -> &str {
-        "ferb-reviewer"
-    }
-
-    async fn run(
-        &self,
-        card_id: Uuid,
-        state: &FerbState,
-    ) -> anyhow::Result<AgentResponse> {
-        let task_id = card_id.to_string();
-
-        let task = match state.kanban_board.get_task(&task_id) {
-            Some(t) => t.clone(),
-            None => return Ok(AgentResponse::noop(&task_id)),
-        };
-
-        if !state.kanban_board.inputs_done(&task) || task.status == TaskStatus::Done {
-            return Ok(AgentResponse::noop(&task_id));
-        }
-
-        if task.max_iterations > 0 && task.iterations_used >= task.max_iterations {
-            return Ok(AgentResponse {
-                done: true,
-                card_id: task_id,
-                questions: vec![],
-                answers: vec![],
-                artifacts: vec![],
-                message: "Exhausted iterations".to_string(),
-            });
-        }
-
-        let prompt_file = task.prompt.as_deref().unwrap_or("reviewer.md");
-        let system_prompt = load_prompt(prompt_file)?;
-        let context = build_context(state, &task_id);
-        let raw = self.tramway.complete(&system_prompt, &context).await?;
-        let response: ReviewerResponse = ferb_utils::parse_json(&raw)?;
-
-        let done = response
-            .kanban_update
-            .as_ref()
-            .map(|u| u.status == "done")
-            .unwrap_or(false);
-        let mut artifacts = vec![];
-        if let Some(serde_json::Value::Object(map)) = response.artifacts {
-            for (key, value) in map {
-                artifacts.push(ArtifactEntry {
-                    name: key,
-                    content_type: "application/json".to_string(),
-                    content: serde_json::to_string(&value).unwrap_or_default(),
-                });
-            }
-        }
-
-        Ok(AgentResponse {
-            done,
-            card_id: task_id,
-            questions: vec![],
-            answers: vec![],
-            artifacts,
-            message: response
-                .kanban_update
-                .and_then(|u| u.comment)
-                .unwrap_or_default(),
-        })
-    }
-}
-
 fn build_context(state: &FerbState, task_id: &str) -> String {
     let task = state.kanban_board.get_task(task_id).unwrap();
-
     let mut ctx = String::new();
 
     ctx.push_str(&format!("## Task: {}\n", task.name));
     ctx.push_str(&format!("Status: {:?}\n", task.status));
-    ctx.push_str(&format!(
-        "Iterations used: {}/{}\n\n",
-        task.iterations_used, task.max_iterations
-    ));
+    ctx.push_str(&format!("Iterations used: {}/{}\n\n", task.iterations_used, task.max_iterations));
 
     ctx.push_str("## Input Artifacts\n");
     for input_id in &task.inputs {
@@ -307,13 +212,66 @@ fn build_context(state: &FerbState, task_id: &str) -> String {
     ctx
 }
 
+#[async_trait]
+impl FerbAgent for Reviewer {
+    fn agent_name(&self) -> &str {
+        "ferb-reviewer"
+    }
+
+    fn system_prompt(&self) -> &str {
+        "You are a code reviewer agent that reviews work on a software task. \
+         Read the thread history and evaluate the current state. \
+         Respond with valid JSON only: {\"done\": true/false, \"post\": \"your review comments or approval message\"}"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferb_core::PostResponse;
+    use ferb_agent_core::{CardContext, Issue, IssueStatus, Post};
 
-    fn make_post(author: &str, content: &str) -> PostResponse {
-        PostResponse {
+    use ferb_core::TramwayClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_context() -> CardContext {
+        CardContext {
+            card: Issue {
+                id: "550e8400-e29b-41d4-a716-446655440000".parse().unwrap(),
+                title: "Add login feature".to_string(),
+                status: IssueStatus::InProgress,
+            },
+            thread_id: "660e8400-e29b-41d4-a716-446655440001".parse().unwrap(),
+            channel_id: "770e8400-e29b-41d4-a716-446655440002".parse().unwrap(),
+            posts: vec![Post {
+                id: "880e8400-e29b-41d4-a716-446655440003".parse().unwrap(),
+                author: "ferb-worker".to_string(),
+                content: "Implemented JWT-based login endpoint.".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_returns_valid_agent_response() {
+        let tramway = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"done\": false, \"post\": \"Looks good, needs tests.\"}"}}]
+            })))
+            .mount(&tramway)
+            .await;
+
+        let agent = Reviewer::new("http://127.0.0.1:1", &tramway.uri(), "test-model");
+        let tc = TramwayClient::new(&tramway.uri(), "test-model");
+        let resp = agent.run(make_context(), &tc).await.unwrap();
+        assert!(!resp.done);
+        assert!(!resp.post.is_empty());
+    }
+
+    fn make_post(author: &str, content: &str) -> ferb_core::PostResponse {
+        ferb_core::PostResponse {
             id: "test-id".to_string(),
             author: author.to_string(),
             content: content.to_string(),
@@ -325,10 +283,7 @@ mod tests {
     fn build_thread_context_formats_posts() {
         let posts = vec![
             make_post("ferb-user-proxy", "Build a todo app"),
-            make_post(
-                "ferb-reviewer",
-                r#"{"type":"question","content":"What framework?"}"#,
-            ),
+            make_post("ferb-reviewer", r#"{"type":"question","content":"What framework?"}"#),
             make_post("ferb-user-proxy", "React"),
         ];
         let ctx = build_thread_context(&posts);

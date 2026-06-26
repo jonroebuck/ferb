@@ -431,7 +431,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "serde_yaml",
  "tokio",
  "uuid",
  "wiremock",
@@ -445,7 +444,10 @@ dependencies = [
  "async-trait",
  "ferb-agent-core",
  "ferb-core",
+ "serde_json",
+ "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -497,6 +499,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -511,6 +514,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -521,7 +525,10 @@ dependencies = [
  "async-trait",
  "ferb-agent-core",
  "ferb-core",
+ "serde_json",
+ "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -537,6 +544,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -550,6 +558,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -574,6 +583,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

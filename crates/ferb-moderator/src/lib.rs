@@ -1,39 +1,16 @@
 use async_trait::async_trait;
-use ferb_agent_core::{
-    AgentResponse, FerbAgent, HasSwitchboard, KanbanAgent, SwitchboardClient, ThreadAgent, Uuid,
-    Workflow,
-};
+use ferb_agent_core::{FerbAgent, SwitchboardClient};
 use ferb_core::{FerbState, KanbanQuestion, QuestionStatus, TaskStatus};
 
 pub struct Moderator {
-    sb: SwitchboardClient,
+    _sb: SwitchboardClient,
 }
 
 impl Moderator {
     pub fn new(switchboard_url: &str) -> Self {
         Self {
-            sb: SwitchboardClient::new(switchboard_url),
+            _sb: SwitchboardClient::new(switchboard_url),
         }
-    }
-
-    pub async fn setup_channels(
-        &self,
-        workflow: &Workflow,
-        state: &mut FerbState,
-    ) -> anyhow::Result<()> {
-        for ch_def in &workflow.channels {
-            let channel = self.sb.create_channel(&ch_def.name, &ch_def.name).await?;
-            state
-                .channel_ids
-                .insert(ch_def.name.clone(), channel.id.to_string());
-
-            for th_def in &ch_def.threads {
-                let thread = self.sb.create_thread(channel.id, &th_def.name).await?;
-                let key = format!("{}:{}", ch_def.name, th_def.name);
-                state.thread_ids.insert(key, thread.id.to_string());
-            }
-        }
-        Ok(())
     }
 
     pub fn reconcile(&self, state: &mut FerbState) {
@@ -101,36 +78,61 @@ impl Moderator {
     }
 }
 
-impl HasSwitchboard for Moderator {
-    fn switchboard(&self) -> &SwitchboardClient {
-        &self.sb
-    }
-}
-
-#[async_trait]
-impl KanbanAgent for Moderator {}
-
-#[async_trait]
-impl ThreadAgent for Moderator {}
-
 #[async_trait]
 impl FerbAgent for Moderator {
     fn agent_name(&self) -> &str {
         "ferb-moderator"
     }
 
-    async fn run(
-        &self,
-        card_id: Uuid,
-        _state: &FerbState,
-    ) -> anyhow::Result<AgentResponse> {
-        Ok(AgentResponse {
-            done: true,
-            card_id: card_id.to_string(),
-            questions: vec![],
-            answers: vec![],
-            artifacts: vec![],
-            message: "Channels and threads configured".to_string(),
-        })
+    fn system_prompt(&self) -> &str {
+        "You are a moderator agent that oversees workflow coordination. \
+         Read the thread history and ensure the workflow is progressing correctly. \
+         Respond with valid JSON only: {\"done\": true/false, \"post\": \"your coordination notes or status update\"}"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferb_agent_core::{CardContext, Issue, IssueStatus, Post};
+
+    use ferb_core::TramwayClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_context() -> CardContext {
+        CardContext {
+            card: Issue {
+                id: "550e8400-e29b-41d4-a716-446655440000".parse().unwrap(),
+                title: "Sprint coordination".to_string(),
+                status: IssueStatus::InProgress,
+            },
+            thread_id: "660e8400-e29b-41d4-a716-446655440001".parse().unwrap(),
+            channel_id: "770e8400-e29b-41d4-a716-446655440002".parse().unwrap(),
+            posts: vec![Post {
+                id: "880e8400-e29b-41d4-a716-446655440003".parse().unwrap(),
+                author: "ferb-worker".to_string(),
+                content: "Task A is blocked waiting for API credentials.".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_returns_valid_agent_response() {
+        let tramway = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"done\": false, \"post\": \"Escalating API credentials blocker to user.\"}"}}]
+            })))
+            .mount(&tramway)
+            .await;
+
+        let agent = Moderator::new("http://127.0.0.1:1");
+        let tc = TramwayClient::new(&tramway.uri(), "test-model");
+        let resp = agent.run(make_context(), &tc).await.unwrap();
+        assert!(!resp.done);
+        assert!(!resp.post.is_empty());
     }
 }

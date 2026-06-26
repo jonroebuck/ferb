@@ -1,53 +1,17 @@
 use async_trait::async_trait;
-use ferb_agent_core::{
-    AgentResponse, FerbAgent, HasSwitchboard, KanbanAgent, SwitchboardClient, ThreadAgent, Uuid,
-    Workflow,
-};
-use ferb_core::FerbState;
+use ferb_agent_core::{FerbAgent, SwitchboardClient};
 
 pub struct KanbanManager {
-    sb: SwitchboardClient,
+    _sb: SwitchboardClient,
 }
 
 impl KanbanManager {
     pub fn new(switchboard_url: &str) -> Self {
         Self {
-            sb: SwitchboardClient::new(switchboard_url),
+            _sb: SwitchboardClient::new(switchboard_url),
         }
     }
-
-    pub async fn setup_cards(
-        &self,
-        workflow: &Workflow,
-        state: &mut FerbState,
-    ) -> anyhow::Result<()> {
-        for card in &workflow.cards {
-            let issue = self
-                .sb
-                .create_issue(&card.title, &card.agents)
-                .await?;
-            state
-                .card_ids
-                .insert(card.title.clone(), issue.id.to_string());
-            state
-                .agent_assignments
-                .insert(issue.id.to_string(), card.agents.clone());
-        }
-        Ok(())
-    }
 }
-
-impl HasSwitchboard for KanbanManager {
-    fn switchboard(&self) -> &SwitchboardClient {
-        &self.sb
-    }
-}
-
-#[async_trait]
-impl KanbanAgent for KanbanManager {}
-
-#[async_trait]
-impl ThreadAgent for KanbanManager {}
 
 #[async_trait]
 impl FerbAgent for KanbanManager {
@@ -55,18 +19,55 @@ impl FerbAgent for KanbanManager {
         "ferb-kanban-manager"
     }
 
-    async fn run(
-        &self,
-        card_id: Uuid,
-        _state: &FerbState,
-    ) -> anyhow::Result<AgentResponse> {
-        Ok(AgentResponse {
-            done: true,
-            card_id: card_id.to_string(),
-            questions: vec![],
-            answers: vec![],
-            artifacts: vec![],
-            message: "Kanban cards created".to_string(),
-        })
+    fn system_prompt(&self) -> &str {
+        "You are a kanban manager agent that organizes and tracks workflow cards. \
+         Read the thread history and manage task assignments and priorities. \
+         Respond with valid JSON only: {\"done\": true/false, \"post\": \"your kanban management update\"}"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferb_agent_core::{CardContext, Issue, IssueStatus, Post};
+
+    use ferb_core::TramwayClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_context() -> CardContext {
+        CardContext {
+            card: Issue {
+                id: "550e8400-e29b-41d4-a716-446655440000".parse().unwrap(),
+                title: "Set up sprint board".to_string(),
+                status: IssueStatus::Backlog,
+            },
+            thread_id: "660e8400-e29b-41d4-a716-446655440001".parse().unwrap(),
+            channel_id: "770e8400-e29b-41d4-a716-446655440002".parse().unwrap(),
+            posts: vec![Post {
+                id: "880e8400-e29b-41d4-a716-446655440003".parse().unwrap(),
+                author: "ferb-user-proxy".to_string(),
+                content: "We have 5 tasks for this sprint.".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_returns_valid_agent_response() {
+        let tramway = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"done\": true, \"post\": \"Sprint board configured with 5 tasks.\"}"}}]
+            })))
+            .mount(&tramway)
+            .await;
+
+        let agent = KanbanManager::new("http://127.0.0.1:1");
+        let tc = TramwayClient::new(&tramway.uri(), "test-model");
+        let resp = agent.run(make_context(), &tc).await.unwrap();
+        assert!(resp.done);
+        assert!(!resp.post.is_empty());
     }
 }

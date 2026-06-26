@@ -1,436 +1,254 @@
 use ferb_agent_core::*;
+use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn channel_schema_json() -> serde_json::Value {
+fn test_uuid() -> Uuid {
+    "550e8400-e29b-41d4-a716-446655440000".parse().unwrap()
+}
+
+fn channel_json(id: Uuid, name: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id, "name": name })
+}
+
+fn thread_json(id: Uuid, channel_id: Uuid, title: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id, "channel_id": channel_id, "title": title })
+}
+
+fn issue_json(id: Uuid, title: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id, "title": title, "status": status })
+}
+
+fn post_json(id: Uuid, author: &str, content: &str) -> serde_json::Value {
     serde_json::json!({
-        "resource": "channels",
-        "required": ["name", "description"],
-        "optional": []
+        "id": id,
+        "author": author,
+        "content": content,
+        "created_at": "2026-01-01T00:00:00Z"
     })
 }
 
-fn uuid_str() -> &'static str {
-    "550e8400-e29b-41d4-a716-446655440000"
-}
+// ── health_check ──────────────────────────────────────────────────────────
 
-fn test_uuid() -> Uuid {
-    uuid_str().parse().unwrap()
+#[tokio::test]
+async fn test_health_check_succeeds() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    assert!(client.health_check().await.is_ok());
 }
 
 #[tokio::test]
-async fn test_workflow_yaml_parsing() {
-    let yaml = r#"
-name: test-workflow
-description: A test workflow
-channels:
-  - name: general
-    threads:
-      - name: progress
-      - name: questions
-cards:
-  - title: define-goal
-    agents: [ferb-reviewer, ferb-user-proxy]
-  - title: implementation
-    agents: [ferb-worker, ferb-reviewer]
-agents:
-  - name: ferb-reviewer
-    role: Reviews work
-  - name: ferb-worker
-    role: Implements solutions
-"#;
-    let wf = parse_workflow(yaml).unwrap();
-    assert_eq!(wf.name, "test-workflow");
-    assert_eq!(wf.channels.len(), 1);
-    assert_eq!(wf.channels[0].threads.len(), 2);
-    assert_eq!(wf.cards.len(), 2);
-    assert_eq!(wf.cards[0].agents, vec!["ferb-reviewer", "ferb-user-proxy"]);
-    assert_eq!(wf.agents.len(), 2);
-    assert!(!wf.is_bootstrap());
+async fn test_health_check_fails_when_unreachable() {
+    let client = SwitchboardClient::new("http://127.0.0.1:1");
+    let err = client.health_check().await.unwrap_err();
+    assert!(err.to_string().contains("Cannot connect to Switchboard"));
 }
 
 #[tokio::test]
-async fn test_bootstrap_workflow_parsing() {
-    let yaml = r#"
-name: default
-description: Bootstrap workflow
+async fn test_health_check_fails_on_non_2xx() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema/channels"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
 
-steps:
-  - name: fetch-workflow
-    agent: ferb-moderator
-    task: fetch the workflow
-  - name: setup-channels
-    agent: ferb-moderator
-    task: create channels
-    depends_on: fetch-workflow
-  - name: handoff
-    task: start target workflow
-    depends_on:
-      - setup-channels
-"#;
-    let wf = parse_workflow(yaml).unwrap();
-    assert_eq!(wf.name, "default");
-    assert!(wf.is_bootstrap());
-    assert_eq!(wf.steps.len(), 3);
-    assert_eq!(wf.steps[0].agent, Some("ferb-moderator".to_string()));
-    assert!(wf.steps[2].agent.is_none());
-
-    match &wf.steps[2].depends_on {
-        Some(DependsOn::Multiple(deps)) => assert_eq!(deps, &["setup-channels"]),
-        _ => panic!("expected multiple deps"),
-    }
+    let client = SwitchboardClient::new(&server.uri());
+    let err = client.health_check().await.unwrap_err();
+    assert!(err.to_string().contains("Cannot connect to Switchboard"));
 }
 
+// ── create_channel ────────────────────────────────────────────────────────
+
 #[tokio::test]
-async fn test_get_card() {
+async fn test_create_channel() {
     let server = MockServer::start().await;
     let id = test_uuid();
+    Mock::given(method("POST"))
+        .and(path("/api/v1/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(channel_json(id, "general")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let ch = client.create_channel("general").await.unwrap();
+    assert_eq!(ch.id, id);
+    assert_eq!(ch.name, "general");
+}
+
+// ── create_thread ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_create_thread_sends_author_ferb() {
+    let server = MockServer::start().await;
+    let ch_id = test_uuid();
+    let th_id: Uuid = "660e8400-e29b-41d4-a716-446655440001".parse().unwrap();
+
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/channels/{}/threads", ch_id)))
+        .and(wiremock::matchers::body_json(serde_json::json!({
+            "title": "progress",
+            "author": "ferb"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(thread_json(th_id, ch_id, "progress")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let th = client.create_thread(ch_id, "progress").await.unwrap();
+    assert_eq!(th.id, th_id);
+    assert_eq!(th.channel_id, ch_id);
+    assert_eq!(th.title, "progress");
+}
+
+// ── list_posts ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_list_posts() {
+    let server = MockServer::start().await;
+    let th_id = test_uuid();
+    let post_id: Uuid = "770e8400-e29b-41d4-a716-446655440002".parse().unwrap();
 
     Mock::given(method("GET"))
+        .and(path(format!("/api/v1/threads/{}/posts", th_id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            post_json(post_id, "ferb-user-proxy", "Build a todo app")
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let posts = client.list_posts(th_id).await.unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].author, "ferb-user-proxy");
+    assert_eq!(posts[0].content, "Build a todo app");
+}
+
+// ── post_to_thread ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_post_to_thread() {
+    let server = MockServer::start().await;
+    let th_id = test_uuid();
+    let post_id: Uuid = "880e8400-e29b-41d4-a716-446655440003".parse().unwrap();
+
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/threads/{}/posts", th_id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            post_json(post_id, "ferb-reviewer", r#"{"done":false,"post":"looks good"}"#),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let post = client
+        .post_to_thread(th_id, "ferb-reviewer", r#"{"done":false,"post":"looks good"}"#)
+        .await
+        .unwrap();
+    assert_eq!(post.author, "ferb-reviewer");
+}
+
+// ── create_issue ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_create_issue() {
+    let server = MockServer::start().await;
+    let id = test_uuid();
+    Mock::given(method("POST"))
+        .and(path("/api/v1/issues"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(id, "My task", "backlog")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let issue = client.create_issue("My task").await.unwrap();
+    assert_eq!(issue.id, id);
+    assert_eq!(issue.title, "My task");
+    assert_eq!(issue.status, IssueStatus::Backlog);
+}
+
+// ── update_issue_status ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_update_issue_status() {
+    let server = MockServer::start().await;
+    let id = test_uuid();
+    Mock::given(method("PATCH"))
+        .and(path(format!("/api/v1/issues/{}/status", id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(id, "My task", "done")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    assert!(client.update_issue_status(id, "done").await.is_ok());
+}
+
+// ── get_issue ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_get_issue() {
+    let server = MockServer::start().await;
+    let id = test_uuid();
+    Mock::given(method("GET"))
         .and(path(format!("/api/v1/issues/{}", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": id,
-            "title": "test card",
-            "status": "backlog",
-            "assigned_agents": ["ferb-reviewer"]
-        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(id, "My task", "in_progress")))
         .expect(1)
         .mount(&server)
         .await;
 
     let client = SwitchboardClient::new(&server.uri());
     let issue = client.get_issue(id).await.unwrap();
-    assert_eq!(issue.title, "test card");
-    assert_eq!(issue.status, IssueStatus::Backlog);
-    assert_eq!(issue.assigned_agents, vec!["ferb-reviewer"]);
+    assert_eq!(issue.status, IssueStatus::InProgress);
 }
 
-#[tokio::test]
-async fn test_update_card_status() {
-    let server = MockServer::start().await;
-    let id = test_uuid();
-    let event_id: Uuid = "660e8400-e29b-41d4-a716-446655440001".parse().unwrap();
+// ── helpers ───────────────────────────────────────────────────────────────
 
-    Mock::given(method("PATCH"))
-        .and(path(format!("/api/v1/issues/{}", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": event_id,
-            "issue_id": id,
-            "agent": "system",
-            "content": "Status changed to in_progress",
-            "timestamp": "2026-06-25T00:00:00Z"
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let event = client
-        .update_issue_status(id, &IssueStatus::InProgress)
-        .await
-        .unwrap();
-    assert_eq!(event.issue_id, id);
+#[test]
+fn test_format_thread_history() {
+    let posts = vec![
+        Post {
+            id: test_uuid(),
+            author: "ferb-user-proxy".to_string(),
+            content: "Build a todo app".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        },
+        Post {
+            id: "660e8400-e29b-41d4-a716-446655440001".parse().unwrap(),
+            author: "ferb-reviewer".to_string(),
+            content: "What framework?".to_string(),
+            created_at: "2026-01-01T00:01:00Z".to_string(),
+        },
+    ];
+    let history = format_thread_history(&posts);
+    assert!(history.contains("[ferb-user-proxy]: Build a todo app"));
+    assert!(history.contains("[ferb-reviewer]: What framework?"));
 }
 
-#[tokio::test]
-async fn test_post_card_comment() {
-    let server = MockServer::start().await;
-    let id = test_uuid();
-    let event_id: Uuid = "770e8400-e29b-41d4-a716-446655440002".parse().unwrap();
-
-    Mock::given(method("POST"))
-        .and(path(format!("/api/v1/issues/{}/comments", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": event_id,
-            "issue_id": id,
-            "agent": "ferb-reviewer",
-            "content": "looks good",
-            "timestamp": "2026-06-25T00:00:00Z"
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let event = client
-        .post_issue_comment(id, "ferb-reviewer", "looks good")
-        .await
-        .unwrap();
-    assert_eq!(event.content, "looks good");
-}
-
-#[tokio::test]
-async fn test_list_card_questions() {
-    let server = MockServer::start().await;
-    let id = test_uuid();
-    let q_id: Uuid = "880e8400-e29b-41d4-a716-446655440003".parse().unwrap();
-
-    Mock::given(method("GET"))
-        .and(path(format!("/api/v1/issues/{}/questions", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            {
-                "id": q_id,
-                "text": "What color?",
-                "asked_by": "ferb-reviewer",
-                "answer": null,
-                "answered_by": null
-            }
-        ])))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let questions = client.list_questions(id).await.unwrap();
-    assert_eq!(questions.len(), 1);
-    assert_eq!(questions[0].text, "What color?");
-    assert!(questions[0].answer.is_none());
-}
-
-#[tokio::test]
-async fn test_post_question() {
-    let server = MockServer::start().await;
-    let id = test_uuid();
-    let q_id: Uuid = "990e8400-e29b-41d4-a716-446655440004".parse().unwrap();
-
-    Mock::given(method("POST"))
-        .and(path(format!("/api/v1/issues/{}/questions", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": q_id,
-            "text": "What framework?",
-            "asked_by": "ferb-reviewer"
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let q = client
-        .post_question(id, "What framework?", "ferb-reviewer")
-        .await
-        .unwrap();
-    assert_eq!(q.text, "What framework?");
-}
-
-#[tokio::test]
-async fn test_answer_question() {
-    let server = MockServer::start().await;
-    let id = test_uuid();
-    let q_id: Uuid = "aa0e8400-e29b-41d4-a716-446655440005".parse().unwrap();
-
-    Mock::given(method("POST"))
-        .and(path(format!("/api/v1/issues/{}/questions/{}/answers", id, q_id)))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    client
-        .answer_question(id, q_id, "React", "ferb-user-proxy")
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn test_create_channel_and_thread() {
-    let server = MockServer::start().await;
-    let ch_id = test_uuid();
-    let th_id: Uuid = "bb0e8400-e29b-41d4-a716-446655440006".parse().unwrap();
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/schema/channels"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(channel_schema_json()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(path("/api/v1/channels"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": ch_id,
-            "name": "general",
-            "threads": []
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(path(format!("/api/v1/channels/{}/threads", ch_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": th_id,
-            "channel_id": ch_id,
-            "title": "progress"
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let channel = client.create_channel("general", "General channel").await.unwrap();
-    assert_eq!(channel.name, "general");
-
-    let thread = client.create_thread(channel.id, "progress").await.unwrap();
-    assert_eq!(thread.title, "progress");
-    assert_eq!(thread.channel_id, ch_id);
-}
-
-#[tokio::test]
-async fn test_post_to_thread_and_list() {
-    let server = MockServer::start().await;
-    let th_id = test_uuid();
-    let post_id: Uuid = "cc0e8400-e29b-41d4-a716-446655440007".parse().unwrap();
-
-    Mock::given(method("POST"))
-        .and(path(format!("/api/v1/threads/{}/posts", th_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": post_id,
-            "thread_id": th_id,
-            "content": "hello",
-            "author": "ferb-reviewer",
-            "timestamp": "2026-06-25T00:00:00Z"
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path(format!("/api/v1/threads/{}/posts", th_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            {
-                "id": post_id,
-                "thread_id": th_id,
-                "content": "hello",
-                "author": "ferb-reviewer",
-                "timestamp": "2026-06-25T00:00:00Z"
-            }
-        ])))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-
-    let post = client
-        .post_to_thread(th_id, "ferb-reviewer", "hello")
-        .await
-        .unwrap();
-    assert_eq!(post.content, "hello");
-
-    let posts = client.list_thread_posts(th_id).await.unwrap();
-    assert_eq!(posts.len(), 1);
-    assert_eq!(posts[0].author, "ferb-reviewer");
-}
-
-#[tokio::test]
-async fn test_create_issue_with_agents() {
-    let server = MockServer::start().await;
-    let id = test_uuid();
-
-    Mock::given(method("POST"))
-        .and(path("/api/v1/issues"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": id,
-            "title": "define-goal",
-            "status": "backlog",
-            "assigned_agents": ["ferb-reviewer", "ferb-user-proxy"]
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let agents = vec!["ferb-reviewer".to_string(), "ferb-user-proxy".to_string()];
-    let issue = client.create_issue("define-goal", &agents).await.unwrap();
-    assert_eq!(issue.assigned_agents.len(), 2);
-}
-
-#[tokio::test]
-async fn test_agent_response_noop() {
-    let resp = AgentResponse::noop("test-card");
+#[test]
+fn test_parse_agent_response_plain_json() {
+    let raw = r#"{"done": false, "post": "Looks good"}"#;
+    let resp = parse_agent_response(raw).unwrap();
     assert!(!resp.done);
-    assert_eq!(resp.card_id, "test-card");
-    assert!(resp.questions.is_empty());
-    assert!(resp.answers.is_empty());
-    assert!(resp.artifacts.is_empty());
-    assert!(resp.message.is_empty());
-}
-
-#[tokio::test]
-async fn test_get_schema() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/schema/channels"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(channel_schema_json()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let schema = client.get_schema("channels").await.unwrap();
-    assert_eq!(schema.resource, "channels");
-    assert_eq!(schema.required, vec!["name", "description"]);
-    assert!(schema.optional.is_empty());
-}
-
-#[tokio::test]
-async fn test_create_channel_formats_payload_from_schema() {
-    let server = MockServer::start().await;
-    let ch_id = test_uuid();
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/schema/channels"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(channel_schema_json()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(path("/api/v1/channels"))
-        .and(wiremock::matchers::body_json(serde_json::json!({
-            "name": "dev",
-            "description": "Development channel"
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": ch_id,
-            "name": "dev",
-            "threads": []
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = SwitchboardClient::new(&server.uri());
-    let channel = client.create_channel("dev", "Development channel").await.unwrap();
-    assert_eq!(channel.name, "dev");
+    assert_eq!(resp.post, "Looks good");
 }
 
 #[test]
-fn test_validate_required_fields_all_present() {
-    let schema = CreateSchema {
-        resource: "channels".to_string(),
-        required: vec!["name".to_string(), "description".to_string()],
-        optional: vec![],
-    };
-    let mut fields = serde_json::Map::new();
-    fields.insert("name".to_string(), "test".into());
-    fields.insert("description".to_string(), "Test channel".into());
-    assert!(validate_required_fields(&schema, &fields).is_ok());
-}
-
-#[test]
-fn test_missing_required_field_caught_before_sending() {
-    let schema = CreateSchema {
-        resource: "channels".to_string(),
-        required: vec!["name".to_string(), "description".to_string()],
-        optional: vec![],
-    };
-    let mut fields = serde_json::Map::new();
-    fields.insert("name".to_string(), "test".into());
-    // description deliberately omitted
-    let err = validate_required_fields(&schema, &fields).unwrap_err();
-    assert!(err.to_string().contains("description"));
-    assert!(err.to_string().contains("channels"));
+fn test_parse_agent_response_strips_markdown_fence() {
+    let raw = "```json\n{\"done\": true, \"post\": \"approved\"}\n```";
+    let resp = parse_agent_response(raw).unwrap();
+    assert!(resp.done);
+    assert_eq!(resp.post, "approved");
 }
