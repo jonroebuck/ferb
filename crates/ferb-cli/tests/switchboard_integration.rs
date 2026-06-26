@@ -212,13 +212,21 @@ async fn test_switchboard_unavailable_returns_error() {
     assert!(result.is_err());
 }
 
+fn channels_schema_json() -> serde_json::Value {
+    serde_json::json!({
+        "resource": "channels",
+        "required": ["name", "description"],
+        "optional": []
+    })
+}
+
 #[tokio::test]
 async fn test_health_check_succeeds_when_reachable() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/schema"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .and(path("/api/v1/schema/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(channels_schema_json()))
         .expect(1)
         .mount(&server)
         .await;
@@ -241,7 +249,7 @@ async fn test_health_check_fails_on_non_2xx() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/schema"))
+        .and(path("/api/v1/schema/channels"))
         .respond_with(ResponseTemplate::new(503))
         .expect(1)
         .mount(&server)
@@ -315,6 +323,73 @@ async fn test_create_channel_failure_returns_error() {
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(msg.contains("create_channel"), "unexpected: {}", msg);
+}
+
+fn artifact_json(id: &str, name: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id, "name": name })
+}
+
+#[tokio::test]
+async fn test_create_artifact_with_schema_defaults() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema/artifacts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "resource": "artifacts",
+            "required": ["name", "content_type", "source_type"],
+            "optional": ["description"]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/artifacts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(artifact_json("art-1", "my-artifact")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let artifact = client.create_artifact("my-artifact").await.unwrap();
+    assert_eq!(artifact.id, "art-1");
+    assert_eq!(artifact.name, "my-artifact");
+}
+
+#[tokio::test]
+async fn test_create_artifact_without_schema_still_posts() {
+    let server = MockServer::start().await;
+
+    // No schema mock — wiremock returns 404, so schema fetch returns None.
+    // create_artifact should proceed with just {name}.
+    Mock::given(method("POST"))
+        .and(path("/api/v1/artifacts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(artifact_json("art-2", "bare-artifact")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let artifact = client.create_artifact("bare-artifact").await.unwrap();
+    assert_eq!(artifact.id, "art-2");
+}
+
+#[tokio::test]
+async fn test_create_artifact_failure_returns_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/artifacts"))
+        .respond_with(ResponseTemplate::new(422).set_body_string("Unprocessable Entity"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let result = client.create_artifact("bad-artifact").await;
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("create_artifact"), "unexpected: {}", msg);
 }
 
 #[tokio::test]

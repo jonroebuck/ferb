@@ -53,6 +53,12 @@ pub struct PostResponse {
     pub timestamp: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ArtifactResponse {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SwitchboardRunState {
     pub issue_id: String,
@@ -73,11 +79,11 @@ impl SwitchboardClient {
         }
     }
 
-    /// Verify that Switchboard is reachable. Fails if the server cannot be
-    /// contacted or returns a non-2xx response. Warns (but succeeds) when the
-    /// response body is not the expected schema format.
+    /// Verify that Switchboard is reachable by fetching the channels schema.
+    /// Fails if the server cannot be contacted or returns a non-2xx response.
+    /// Warns (but succeeds) when the response body is not the expected schema format.
     pub async fn health_check(&self) -> anyhow::Result<()> {
-        let url = format!("{}/api/v1/schema", self.base_url);
+        let url = format!("{}/api/v1/schema/channels", self.base_url);
         let resp = self
             .http
             .get(&url)
@@ -87,7 +93,7 @@ impl SwitchboardClient {
         if !resp.status().is_success() {
             anyhow::bail!("Cannot connect to Switchboard at {}", self.base_url);
         }
-        if resp.json::<serde_json::Value>().await.is_err() {
+        if resp.json::<CreateSchema>().await.is_err() {
             eprintln!("[warn] Switchboard returned unexpected schema response — continuing");
         }
         Ok(())
@@ -173,6 +179,21 @@ impl SwitchboardClient {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard create_channel error ({}): {}", status, text);
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn create_artifact(&self, name: &str) -> anyhow::Result<ArtifactResponse> {
+        let url = format!("{}/api/v1/artifacts", self.base_url);
+        let mut body = serde_json::json!({ "name": name });
+        if let Some(schema) = self.get_schema("artifacts").await {
+            body = Self::apply_schema_defaults(body, &schema);
+        }
+        let resp = self.http.post(&url).json(&body).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Switchboard create_artifact error ({}): {}", status, text);
         }
         Ok(resp.json().await?)
     }
