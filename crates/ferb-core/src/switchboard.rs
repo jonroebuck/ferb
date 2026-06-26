@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
-struct CreateIssueRequest {
-    title: String,
-    status: String,
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateSchema {
+    pub resource: String,
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -16,11 +18,6 @@ pub struct IssueResponse {
 #[derive(Debug, Serialize)]
 struct UpdateIssueRequest {
     status: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CreateChannelRequest {
-    name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,16 +73,64 @@ impl SwitchboardClient {
         }
     }
 
+    /// Verify that Switchboard is reachable. Fails if the server cannot be
+    /// contacted or returns a non-2xx response. Warns (but succeeds) when the
+    /// response body is not the expected schema format.
+    pub async fn health_check(&self) -> anyhow::Result<()> {
+        let url = format!("{}/api/v1/schema", self.base_url);
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|_| anyhow::anyhow!("Cannot connect to Switchboard at {}", self.base_url))?;
+        if !resp.status().is_success() {
+            anyhow::bail!("Cannot connect to Switchboard at {}", self.base_url);
+        }
+        if resp.json::<serde_json::Value>().await.is_err() {
+            eprintln!("[warn] Switchboard returned unexpected schema response — continuing");
+        }
+        Ok(())
+    }
+
+    /// Fetch the create-schema for a resource (e.g. "channels", "issues").
+    /// Returns None if the endpoint is unavailable or returns unexpected data.
+    async fn get_schema(&self, resource: &str) -> Option<CreateSchema> {
+        let url = format!("{}/api/v1/schema/{}", self.base_url, resource);
+        let resp = self.http.get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json::<CreateSchema>().await.ok()
+    }
+
+    /// Build a JSON object with all required fields populated, using an empty
+    /// string as the default for any field not supplied by the caller.
+    fn apply_schema_defaults(
+        base: serde_json::Value,
+        schema: &CreateSchema,
+    ) -> serde_json::Value {
+        let mut map = match base {
+            serde_json::Value::Object(m) => m,
+            other => return other,
+        };
+        for field in &schema.required {
+            map.entry(field.clone())
+                .or_insert_with(|| serde_json::Value::String(String::new()));
+        }
+        serde_json::Value::Object(map)
+    }
+
     pub async fn create_issue(
         &self,
         title: &str,
         status: &str,
     ) -> anyhow::Result<IssueResponse> {
         let url = format!("{}/api/v1/issues", self.base_url);
-        let body = CreateIssueRequest {
-            title: title.to_string(),
-            status: status.to_string(),
-        };
+        let mut body = serde_json::json!({ "title": title, "status": status });
+        if let Some(schema) = self.get_schema("issues").await {
+            body = Self::apply_schema_defaults(body, &schema);
+        }
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
@@ -119,9 +164,10 @@ impl SwitchboardClient {
 
     pub async fn create_channel(&self, name: &str) -> anyhow::Result<ChannelResponse> {
         let url = format!("{}/api/v1/channels", self.base_url);
-        let body = CreateChannelRequest {
-            name: name.to_string(),
-        };
+        let mut body = serde_json::json!({ "name": name });
+        if let Some(schema) = self.get_schema("channels").await {
+            body = Self::apply_schema_defaults(body, &schema);
+        }
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();

@@ -123,14 +123,10 @@ async fn switchboard_start(
     sb: &ferb_core::SwitchboardClient,
     title: &str,
     channel_id: Option<&str>,
-) -> Option<ferb_core::SwitchboardRunState> {
-    let issue = match sb.create_issue(title, "backlog").await {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("[warn] Switchboard: failed to create issue: {}", e);
-            return None;
-        }
-    };
+) -> anyhow::Result<ferb_core::SwitchboardRunState> {
+    let issue = sb.create_issue(title, "backlog").await.map_err(|e| {
+        anyhow::anyhow!("Switchboard setup failed — create_issue: {}", e)
+    })?;
 
     let ch_id = if let Some(id) = channel_id {
         id.to_string()
@@ -141,31 +137,22 @@ async fn switchboard_start(
             .as_secs();
         let slug = slugify(title);
         let name = format!("ferb-{}-{}", ts, slug);
-        match sb.create_channel(&name).await {
-            Ok(ch) => ch.id,
-            Err(e) => {
-                eprintln!("[warn] Switchboard: failed to create channel: {}", e);
-                return None;
-            }
-        }
+        sb.create_channel(&name).await.map(|ch| ch.id).map_err(|e| {
+            anyhow::anyhow!("Switchboard setup failed — create_channel: {}", e)
+        })?
     };
 
     if let Err(e) = sb.transition_issue(&issue.id, "in_progress").await {
         eprintln!("[warn] Switchboard: failed to transition issue: {}", e);
     }
 
-    let thread_id = match sb
+    let thread_id = sb
         .create_thread(&ch_id, &format!("Ferb run started: {}", title))
         .await
-    {
-        Ok(t) => t.id,
-        Err(e) => {
-            eprintln!("[warn] Switchboard: failed to create thread: {}", e);
-            return None;
-        }
-    };
+        .map(|t| t.id)
+        .map_err(|e| anyhow::anyhow!("Switchboard setup failed — create_thread: {}", e))?;
 
-    Some(ferb_core::SwitchboardRunState {
+    Ok(ferb_core::SwitchboardRunState {
         issue_id: issue.id,
         channel_id: ch_id,
         thread_id,
@@ -491,7 +478,7 @@ struct Agents<'a> {
     worker: &'a Worker,
     approver: &'a Approver,
     sb: &'a ferb_core::SwitchboardClient,
-    sb_run: &'a Option<ferb_core::SwitchboardRunState>,
+    sb_run: &'a ferb_core::SwitchboardRunState,
 }
 
 fn print_completion_summary(state: &FerbState) {
@@ -631,13 +618,11 @@ async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Res
             let status_after = state.kanban_board.get_task(task_id).map(|t| t.status.clone());
 
             if status_after != status_before {
-                if let Some(run) = agents.sb_run {
-                    let final_status = status_after.unwrap_or(TaskStatus::Pending);
-                    switchboard_post_agent_completion(
-                        agents.sb, run, &agent, task_id, &task_name, &final_status,
-                    )
-                    .await;
-                }
+                let final_status = status_after.unwrap_or(TaskStatus::Pending);
+                switchboard_post_agent_completion(
+                    agents.sb, agents.sb_run, &agent, task_id, &task_name, &final_status,
+                )
+                .await;
             }
         }
 
@@ -709,6 +694,14 @@ pub async fn run_task(
         }
     }
 
+    // ── Switchboard health check ──────────────────────────────────────────
+    sb.health_check().await.map_err(|e| {
+        anyhow::anyhow!(
+            "Error: {}\nRun 'ferb up' to start all required services.",
+            e
+        )
+    })?;
+
     println!("\n=== Ferb ===\n");
 
     // ── Define Goal phase (conversation-based) ────────────────────────────
@@ -727,13 +720,11 @@ pub async fn run_task(
         .map(String::from)
         .or(define_goal_channel);
 
-    let sb_run = switchboard_start(&sb, goal, effective_channel.as_deref()).await;
+    let sb_run = switchboard_start(&sb, goal, effective_channel.as_deref()).await?;
 
     // Store the progress thread in state so handle_summary_confirmation can reach it.
-    if let Some(ref run) = sb_run {
-        state.channel_ids.insert("progress".to_string(), run.channel_id.clone());
-        state.thread_ids.insert("progress".to_string(), run.thread_id.clone());
-    }
+    state.channel_ids.insert("progress".to_string(), sb_run.channel_id.clone());
+    state.thread_ids.insert("progress".to_string(), sb_run.thread_id.clone());
 
     let agents = Agents {
         moderator: &moderator,
@@ -748,16 +739,8 @@ pub async fn run_task(
     let result = run_pipeline(&mut state, &agents).await;
 
     match &result {
-        Ok(()) => {
-            if let Some(run) = &sb_run {
-                switchboard_finish_success(&sb, run, &state).await;
-            }
-        }
-        Err(e) => {
-            if let Some(run) = &sb_run {
-                switchboard_finish_failure(&sb, run, &format!("{}", e)).await;
-            }
-        }
+        Ok(()) => switchboard_finish_success(&sb, &sb_run, &state).await,
+        Err(e) => switchboard_finish_failure(&sb, &sb_run, &format!("{}", e)).await,
     }
 
     result

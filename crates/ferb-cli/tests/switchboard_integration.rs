@@ -213,6 +213,111 @@ async fn test_switchboard_unavailable_returns_error() {
 }
 
 #[tokio::test]
+async fn test_health_check_succeeds_when_reachable() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    assert!(client.health_check().await.is_ok());
+}
+
+#[tokio::test]
+async fn test_health_check_fails_when_unreachable() {
+    let client = SwitchboardClient::new("http://127.0.0.1:1");
+    let result = client.health_check().await;
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("Cannot connect to Switchboard"), "unexpected: {}", msg);
+}
+
+#[tokio::test]
+async fn test_health_check_fails_on_non_2xx() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let result = client.health_check().await;
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("Cannot connect to Switchboard"), "unexpected: {}", msg);
+}
+
+#[tokio::test]
+async fn test_create_channel_adds_required_fields_from_schema() {
+    let server = MockServer::start().await;
+
+    // Schema endpoint returns description as required.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "resource": "channels",
+            "required": ["name", "description"],
+            "optional": []
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(channel_json("ch-s", "test-ch")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let channel = client.create_channel("test-ch").await.unwrap();
+    assert_eq!(channel.name, "test-ch");
+}
+
+#[tokio::test]
+async fn test_create_issue_failure_returns_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/issues"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let result = client.create_issue("failing task", "backlog").await;
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("create_issue"), "unexpected: {}", msg);
+}
+
+#[tokio::test]
+async fn test_create_channel_failure_returns_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/channels"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let result = client.create_channel("failing-channel").await;
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("create_channel"), "unexpected: {}", msg);
+}
+
+#[tokio::test]
 async fn test_full_lifecycle_with_agent_completions() {
     let server = MockServer::start().await;
 
