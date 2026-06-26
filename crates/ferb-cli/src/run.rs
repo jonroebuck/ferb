@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use crate::FerbConfig;
 
-const MAX_PASSES: usize = 100;
+const MAX_PASSES: usize = 10;
 const MAX_DEFINE_GOAL_ITERATIONS: usize = 10;
 
 fn expand_tilde(path: &str) -> PathBuf {
@@ -47,6 +47,12 @@ struct WorkflowTaskDef {
     max_iterations: usize,
     #[serde(default)]
     success_criteria: Vec<String>,
+    #[serde(default = "default_pass_budget")]
+    pass_budget: usize,
+}
+
+fn default_pass_budget() -> usize {
+    3
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +84,7 @@ fn load_workflow(path: &str) -> anyhow::Result<KanbanBoard> {
             questions: vec![],
             comments: vec![],
             success_criteria: t.success_criteria,
+            pass_budget: t.pass_budget,
         })
         .collect();
 
@@ -487,8 +494,51 @@ struct Agents<'a> {
     sb_run: &'a Option<ferb_core::SwitchboardRunState>,
 }
 
+fn print_completion_summary(state: &FerbState) {
+    let done: Vec<_> = state
+        .kanban_board
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Done)
+        .collect();
+    let blocked: Vec<_> = state
+        .kanban_board
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Blocked)
+        .collect();
+    let remaining: Vec<_> = state
+        .kanban_board
+        .tasks
+        .iter()
+        .filter(|t| t.status != TaskStatus::Done && t.status != TaskStatus::Blocked)
+        .collect();
+
+    if !done.is_empty() {
+        println!("## Completed ({}):", done.len());
+        for t in &done {
+            println!("  ✓ {}", t.name);
+        }
+    }
+    if !blocked.is_empty() {
+        println!("\n## Blocked ({}):", blocked.len());
+        for t in &blocked {
+            println!("  ✗ {} (exceeded pass budget of {})", t.name, t.pass_budget);
+        }
+    }
+    if !remaining.is_empty() {
+        println!("\n## Remaining ({}):", remaining.len());
+        for t in &remaining {
+            println!("  ○ {} [{:?}]", t.name, t.status);
+        }
+    }
+}
+
 async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Result<()> {
     let mut printed_headers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut card_pass_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut prev_board_snapshot = String::new();
 
     for pass in 0..MAX_PASSES {
         state.pass = pass;
@@ -505,9 +555,15 @@ async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Res
         if state.kanban_board.all_done() {
             println!("\n=== All tasks complete ===\n");
             print_kanban(state);
-
             println!("## Final Artifacts\n");
             println!("{}", serde_json::to_string_pretty(&state.artifacts)?);
+            return Ok(());
+        }
+
+        if state.kanban_board.all_complete() {
+            println!("\n=== Workflow stopped: some cards blocked ===\n");
+            print_kanban(state);
+            print_completion_summary(state);
             return Ok(());
         }
 
@@ -519,13 +575,33 @@ async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Res
             .collect();
 
         for task_id in &task_ids {
-            let (agent, task_name, task_status) = match state.kanban_board.get_task(task_id) {
-                Some(t) => (t.agent.clone(), t.name.clone(), t.status.clone()),
-                None => continue,
-            };
+            let (agent, task_name, task_status, pass_budget) =
+                match state.kanban_board.get_task(task_id) {
+                    Some(t) => (
+                        t.agent.clone(),
+                        t.name.clone(),
+                        t.status.clone(),
+                        t.pass_budget,
+                    ),
+                    None => continue,
+                };
 
-            // Skip tasks that are already done.
-            if task_status == TaskStatus::Done {
+            // Skip tasks that are already done or blocked.
+            if task_status == TaskStatus::Done || task_status == TaskStatus::Blocked {
+                continue;
+            }
+
+            // Enforce per-card pass budget (0 = unlimited).
+            *card_pass_counts.entry(task_id.clone()).or_insert(0) += 1;
+            let passes_used = card_pass_counts[task_id.as_str()];
+            if pass_budget > 0 && passes_used > pass_budget {
+                eprintln!(
+                    "[warn] Card '{}' exceeded pass budget ({} passes), marking Blocked",
+                    task_name, pass_budget
+                );
+                if let Some(t) = state.kanban_board.get_task_mut(task_id) {
+                    t.status = TaskStatus::Blocked;
+                }
                 continue;
             }
 
@@ -535,10 +611,7 @@ async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Res
                 printed_headers.insert(task_id.clone());
             }
 
-            let status_before = state
-                .kanban_board
-                .get_task(task_id)
-                .map(|t| t.status.clone());
+            let status_before = state.kanban_board.get_task(task_id).map(|t| t.status.clone());
 
             match agent.as_str() {
                 "ferb-reviewer" => {
@@ -555,10 +628,7 @@ async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Res
                 }
             }
 
-            let status_after = state
-                .kanban_board
-                .get_task(task_id)
-                .map(|t| t.status.clone());
+            let status_after = state.kanban_board.get_task(task_id).map(|t| t.status.clone());
 
             if status_after != status_before {
                 if let Some(run) = agents.sb_run {
@@ -573,11 +643,33 @@ async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Res
 
         print_kanban(state);
 
-        if pass == MAX_PASSES - 1 {
+        // Cycle detection: if the board is identical to last pass, nothing can progress.
+        let current_snapshot =
+            serde_json::to_string(&state.kanban_board).unwrap_or_default();
+        if !prev_board_snapshot.is_empty() && current_snapshot == prev_board_snapshot {
+            eprintln!(
+                "\nERROR: Infinite loop detected — board state unchanged after pass {}.",
+                pass + 1
+            );
+            eprintln!("No agent made any progress. Check your workflow for missing inputs or unreachable approval conditions.\n");
+            print_kanban(state);
+            print_completion_summary(state);
             anyhow::bail!(
-                "Max passes ({}) reached without completing all tasks",
+                "Cycle detected: board state was identical after passes {} and {}",
+                pass,
+                pass + 1
+            );
+        }
+        prev_board_snapshot = current_snapshot;
+
+        if pass == MAX_PASSES - 1 {
+            println!(
+                "\nMax passes ({}) reached without completing all tasks.\n",
                 MAX_PASSES
             );
+            print_kanban(state);
+            print_completion_summary(state);
+            return Ok(());
         }
     }
 
@@ -725,6 +817,7 @@ mod tests {
                 questions: vec![],
                 comments: vec![],
                 success_criteria: vec![],
+                pass_budget: 3,
             }],
         };
         let mut state = FerbState::new(board);

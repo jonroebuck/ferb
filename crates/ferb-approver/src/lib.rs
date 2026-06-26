@@ -24,21 +24,31 @@ impl Approver {
             None => return,
         };
 
-        let target_ready = state
+        // Already done — nothing to do.
+        if state
             .kanban_board
-            .get_task(&target_id)
-            .map(|t| t.status == TaskStatus::ReadyForReview)
-            .unwrap_or(false);
-
-        if !target_ready {
+            .get_task(task_id)
+            .map(|t| t.status == TaskStatus::Done)
+            .unwrap_or(false)
+        {
             return;
         }
 
+        // Wait until all of this card's own inputs are done.
+        let task = match state.kanban_board.get_task(task_id) {
+            Some(t) => t.clone(),
+            None => return,
+        };
+        if !state.kanban_board.inputs_done(&task) {
+            return;
+        }
+
+        // Also require that every task which reviews the target is done.
         let all_reviewers_done = state
             .kanban_board
             .tasks
             .iter()
-            .filter(|t| t.reviews.as_deref() == Some(&target_id))
+            .filter(|t| t.reviews.as_deref() == Some(target_id.as_str()))
             .all(|t| t.status == TaskStatus::Done);
 
         if !all_reviewers_done {
@@ -89,13 +99,12 @@ impl FerbAgent for Approver {
             None => return Ok(AgentResponse::noop(&task_id)),
         };
 
-        let target_ready = state
-            .kanban_board
-            .get_task(&target_id)
-            .map(|t| t.status == TaskStatus::ReadyForReview)
-            .unwrap_or(false);
-
-        if !target_ready {
+        // Wait until all of this card's own inputs are done.
+        let task = match state.kanban_board.get_task(&task_id) {
+            Some(t) => t.clone(),
+            None => return Ok(AgentResponse::noop(&task_id)),
+        };
+        if !state.kanban_board.inputs_done(&task) {
             return Ok(AgentResponse::noop(&task_id));
         }
 
@@ -103,7 +112,7 @@ impl FerbAgent for Approver {
             .kanban_board
             .tasks
             .iter()
-            .filter(|t| t.reviews.as_deref() == Some(&target_id))
+            .filter(|t| t.reviews.as_deref() == Some(target_id.as_str()))
             .all(|t| t.status == TaskStatus::Done);
 
         if !all_reviewers_done {

@@ -51,6 +51,13 @@ pub struct KanbanTask {
     pub questions: Vec<KanbanQuestion>,
     pub comments: Vec<KanbanComment>,
     pub success_criteria: Vec<String>,
+    /// Max pipeline passes before the card is marked Blocked. 0 = unlimited.
+    #[serde(default = "default_pass_budget")]
+    pub pass_budget: usize,
+}
+
+fn default_pass_budget() -> usize {
+    3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -60,6 +67,7 @@ pub enum TaskStatus {
     InProgress,
     ReadyForReview,
     Done,
+    Blocked,
     Failed,
 }
 
@@ -80,6 +88,12 @@ impl KanbanBoard {
 
     pub fn all_done(&self) -> bool {
         self.tasks.iter().all(|t| t.status == TaskStatus::Done)
+    }
+
+    pub fn all_complete(&self) -> bool {
+        self.tasks
+            .iter()
+            .all(|t| t.status == TaskStatus::Done || t.status == TaskStatus::Blocked)
     }
 
     pub fn inputs_done(&self, task: &KanbanTask) -> bool {
