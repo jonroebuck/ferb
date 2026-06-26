@@ -10,8 +10,8 @@ fn channel_json(id: &str, name: &str) -> serde_json::Value {
     serde_json::json!({ "id": id, "name": name })
 }
 
-fn thread_json(id: &str, content: &str) -> serde_json::Value {
-    serde_json::json!({ "id": id, "content": content, "timestamp": "2026-06-24T00:00:00Z" })
+fn thread_json(id: &str, title: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id, "title": title, "author": "system" })
 }
 
 fn post_json(id: &str, content: &str) -> serde_json::Value {
@@ -42,7 +42,7 @@ async fn test_run_start_creates_issue_and_channel() {
         .await;
 
     Mock::given(method("PATCH"))
-        .and(path("/api/v1/issues/iss-1"))
+        .and(path("/api/v1/issues/iss-1/status"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(issue_json("iss-1", "my task", "in_progress")),
@@ -77,7 +77,7 @@ async fn test_run_start_creates_issue_and_channel() {
     assert_eq!(transitioned.status, "in_progress");
 
     let thread = client
-        .create_thread(&channel.id, "Ferb run started: my task")
+        .create_thread(&channel.id, "Ferb run started: my task", "system")
         .await
         .unwrap();
     assert_eq!(thread.id, "th-1");
@@ -111,7 +111,7 @@ async fn test_issue_transitions_to_done_on_success() {
     let server = MockServer::start().await;
 
     Mock::given(method("PATCH"))
-        .and(path("/api/v1/issues/iss-1"))
+        .and(path("/api/v1/issues/iss-1/status"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-1", "my task", "done")),
         )
@@ -130,7 +130,7 @@ async fn test_issue_transitions_to_blocked_on_failure() {
     let server = MockServer::start().await;
 
     Mock::given(method("PATCH"))
-        .and(path("/api/v1/issues/iss-1"))
+        .and(path("/api/v1/issues/iss-1/status"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-1", "my task", "blocked")),
         )
@@ -161,7 +161,7 @@ async fn test_channel_flag_reuses_existing_channel() {
     // which would cause an error.
 
     Mock::given(method("PATCH"))
-        .and(path("/api/v1/issues/iss-2"))
+        .and(path("/api/v1/issues/iss-2/status"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(issue_json("iss-2", "resume task", "in_progress")),
@@ -195,7 +195,7 @@ async fn test_channel_flag_reuses_existing_channel() {
         .unwrap();
 
     let thread = client
-        .create_thread(existing_channel_id, "Ferb run started: resume task")
+        .create_thread(existing_channel_id, "Ferb run started: resume task", "system")
         .await
         .unwrap();
     assert_eq!(thread.id, "th-2");
@@ -417,7 +417,7 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     // Start: transition to in_progress, then later to done
     Mock::given(method("PATCH"))
-        .and(path("/api/v1/issues/iss-3"))
+        .and(path("/api/v1/issues/iss-3/status"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-3", "full test", "done")),
         )
@@ -453,7 +453,7 @@ async fn test_full_lifecycle_with_agent_completions() {
         .await
         .unwrap();
     let thread = client
-        .create_thread(&channel.id, "Ferb run started: full test")
+        .create_thread(&channel.id, "Ferb run started: full test", "system")
         .await
         .unwrap();
 

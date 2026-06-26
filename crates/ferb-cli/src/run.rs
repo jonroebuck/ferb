@@ -147,7 +147,7 @@ async fn switchboard_start(
     }
 
     let thread_id = sb
-        .create_thread(&ch_id, &format!("Ferb run started: {}", title))
+        .create_thread(&ch_id, &format!("Ferb run started: {}", title), "system")
         .await
         .map(|t| t.id)
         .map_err(|e| anyhow::anyhow!("Switchboard setup failed — create_thread: {}", e))?;
@@ -332,7 +332,7 @@ async fn setup_define_goal_channel(
     };
 
     let thread = match sb
-        .create_thread(&channel.id, &format!("Define Goal: {}", goal))
+        .create_thread(&channel.id, &format!("Define Goal: {}", goal), "ferb-moderator")
         .await
     {
         Ok(t) => t,

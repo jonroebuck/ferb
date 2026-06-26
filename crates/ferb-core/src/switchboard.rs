@@ -26,16 +26,11 @@ pub struct ChannelResponse {
     pub name: String,
 }
 
-#[derive(Debug, Serialize)]
-struct CreateThreadRequest {
-    content: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct ThreadResponse {
     pub id: String,
-    pub content: String,
-    pub timestamp: String,
+    pub title: String,
+    pub author: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,7 +146,7 @@ impl SwitchboardClient {
         issue_id: &str,
         status: &str,
     ) -> anyhow::Result<IssueResponse> {
-        let url = format!("{}/api/v1/issues/{}", self.base_url, issue_id);
+        let url = format!("{}/api/v1/issues/{}/status", self.base_url, issue_id);
         let body = UpdateIssueRequest {
             status: status.to_string(),
         };
@@ -201,12 +196,14 @@ impl SwitchboardClient {
     pub async fn create_thread(
         &self,
         channel_id: &str,
-        content: &str,
+        title: &str,
+        author: &str,
     ) -> anyhow::Result<ThreadResponse> {
         let url = format!("{}/api/v1/channels/{}/threads", self.base_url, channel_id);
-        let body = CreateThreadRequest {
-            content: content.to_string(),
-        };
+        let mut body = serde_json::json!({ "title": title, "author": author });
+        if let Some(schema) = self.get_schema("threads").await {
+            body = Self::apply_schema_defaults(body, &schema);
+        }
         let resp = self.http.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
