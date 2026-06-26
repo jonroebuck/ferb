@@ -22,7 +22,7 @@ impl Moderator {
         state: &mut FerbState,
     ) -> anyhow::Result<()> {
         for ch_def in &workflow.channels {
-            let channel = self.sb.create_channel(&ch_def.name).await?;
+            let channel = self.sb.create_channel(&ch_def.name, &ch_def.name).await?;
             state
                 .channel_ids
                 .insert(ch_def.name.clone(), channel.id.to_string());

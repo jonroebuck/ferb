@@ -2,6 +2,14 @@ use ferb_agent_core::*;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+fn channel_schema_json() -> serde_json::Value {
+    serde_json::json!({
+        "resource": "channels",
+        "required": ["name", "description"],
+        "optional": []
+    })
+}
+
 fn uuid_str() -> &'static str {
     "550e8400-e29b-41d4-a716-446655440000"
 }
@@ -230,6 +238,13 @@ async fn test_create_channel_and_thread() {
     let ch_id = test_uuid();
     let th_id: Uuid = "bb0e8400-e29b-41d4-a716-446655440006".parse().unwrap();
 
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(channel_schema_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
     Mock::given(method("POST"))
         .and(path("/api/v1/channels"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -253,7 +268,7 @@ async fn test_create_channel_and_thread() {
         .await;
 
     let client = SwitchboardClient::new(&server.uri());
-    let channel = client.create_channel("general").await.unwrap();
+    let channel = client.create_channel("general", "General channel").await.unwrap();
     assert_eq!(channel.name, "general");
 
     let thread = client.create_thread(channel.id, "progress").await.unwrap();
@@ -340,4 +355,82 @@ async fn test_agent_response_noop() {
     assert!(resp.answers.is_empty());
     assert!(resp.artifacts.is_empty());
     assert!(resp.message.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_schema() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(channel_schema_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let schema = client.get_schema("channels").await.unwrap();
+    assert_eq!(schema.resource, "channels");
+    assert_eq!(schema.required, vec!["name", "description"]);
+    assert!(schema.optional.is_empty());
+}
+
+#[tokio::test]
+async fn test_create_channel_formats_payload_from_schema() {
+    let server = MockServer::start().await;
+    let ch_id = test_uuid();
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/schema/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(channel_schema_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/channels"))
+        .and(wiremock::matchers::body_json(serde_json::json!({
+            "name": "dev",
+            "description": "Development channel"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": ch_id,
+            "name": "dev",
+            "threads": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+    let channel = client.create_channel("dev", "Development channel").await.unwrap();
+    assert_eq!(channel.name, "dev");
+}
+
+#[test]
+fn test_validate_required_fields_all_present() {
+    let schema = CreateSchema {
+        resource: "channels".to_string(),
+        required: vec!["name".to_string(), "description".to_string()],
+        optional: vec![],
+    };
+    let mut fields = serde_json::Map::new();
+    fields.insert("name".to_string(), "test".into());
+    fields.insert("description".to_string(), "Test channel".into());
+    assert!(validate_required_fields(&schema, &fields).is_ok());
+}
+
+#[test]
+fn test_missing_required_field_caught_before_sending() {
+    let schema = CreateSchema {
+        resource: "channels".to_string(),
+        required: vec!["name".to_string(), "description".to_string()],
+        optional: vec![],
+    };
+    let mut fields = serde_json::Map::new();
+    fields.insert("name".to_string(), "test".into());
+    // description deliberately omitted
+    let err = validate_required_fields(&schema, &fields).unwrap_err();
+    assert!(err.to_string().contains("description"));
+    assert!(err.to_string().contains("channels"));
 }

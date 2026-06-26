@@ -3,6 +3,28 @@ pub use uuid::Uuid;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+// ── Schema ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSchema {
+    pub resource: String,
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
+}
+
+pub fn validate_required_fields(
+    schema: &CreateSchema,
+    fields: &serde_json::Map<String, serde_json::Value>,
+) -> anyhow::Result<()> {
+    for field in &schema.required {
+        if !fields.contains_key(field.as_str()) {
+            anyhow::bail!("missing required field for {}: {}", schema.resource, field);
+        }
+    }
+    Ok(())
+}
+
 // ── Types ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +152,19 @@ impl SwitchboardClient {
         }
     }
 
+    pub async fn get_schema(&self, resource: &str) -> anyhow::Result<CreateSchema> {
+        eprintln!("[info] Fetching schema for {} from Switchboard", resource);
+        let url = format!("{}/api/v1/schema/{}", self.base_url, resource);
+        let resp = self.http.get(&url).send().await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("GET {} failed: {}", url, resp.status());
+        }
+        let schema: CreateSchema = resp.json().await?;
+        let required_str = schema.required.join(", ");
+        eprintln!("[info] Schema: required=[{}]", required_str);
+        Ok(schema)
+    }
+
     pub async fn get_issue(&self, card_id: Uuid) -> anyhow::Result<Issue> {
         let url = format!("{}/api/v1/issues/{}", self.base_url, card_id);
         let resp = self.http.get(&url).send().await?;
@@ -220,10 +255,14 @@ impl SwitchboardClient {
         Ok(resp.json().await?)
     }
 
-    pub async fn create_channel(&self, name: &str) -> anyhow::Result<Channel> {
+    pub async fn create_channel(&self, name: &str, description: &str) -> anyhow::Result<Channel> {
+        let schema = self.get_schema("channels").await?;
+        let mut fields = serde_json::Map::new();
+        fields.insert("name".to_string(), name.into());
+        fields.insert("description".to_string(), description.into());
+        validate_required_fields(&schema, &fields)?;
         let url = format!("{}/api/v1/channels", self.base_url);
-        let body = serde_json::json!({ "name": name });
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = self.http.post(&url).json(&serde_json::Value::Object(fields)).send().await?;
         if !resp.status().is_success() {
             anyhow::bail!("POST {} failed: {}", url, resp.status());
         }
