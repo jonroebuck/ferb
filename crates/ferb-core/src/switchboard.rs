@@ -200,6 +200,7 @@ impl SwitchboardClient {
         author: &str,
     ) -> anyhow::Result<ThreadResponse> {
         let url = format!("{}/api/v1/channels/{}/threads", self.base_url, channel_id);
+        println!("[trace] create_thread: POST {} (channel_id={}, title={:?})", url, channel_id, title);
         let mut body = serde_json::json!({ "title": title, "author": author });
         if let Some(schema) = self.get_schema("threads").await {
             body = Self::apply_schema_defaults(body, &schema);
@@ -210,7 +211,9 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard create_thread error ({}): {}", status, text);
         }
-        Ok(resp.json().await?)
+        let thread: ThreadResponse = resp.json().await?;
+        println!("[trace] create_thread: returned thread_id={}", thread.id);
+        Ok(thread)
     }
 
     pub async fn post_to_thread(
@@ -224,6 +227,10 @@ impl SwitchboardClient {
             "{}/api/v1/channels/{}/threads/{}/posts",
             self.base_url, channel_id, thread_id
         );
+        println!(
+            "[trace] post_to_thread: POST {} (channel_id={}, thread_id={}, author={})",
+            url, channel_id, thread_id, author
+        );
         let body = CreatePostRequest {
             author: author.to_string(),
             content: content.to_string(),
@@ -234,7 +241,9 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard post_to_thread error ({}): {}", status, text);
         }
-        Ok(resp.json().await?)
+        let post: PostResponse = resp.json().await?;
+        println!("[trace] post_to_thread: returned post_id={}", post.id);
+        Ok(post)
     }
 
     pub async fn list_thread_posts(

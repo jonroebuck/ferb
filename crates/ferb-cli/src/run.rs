@@ -257,11 +257,16 @@ async fn post_initial_goal_with_retry(
     channel_id: &str,
     thread_id: String,
 ) -> anyhow::Result<String> {
+    println!(
+        "[trace] post_initial_goal_with_retry: attempting post to channel_id={} thread_id={}",
+        channel_id, thread_id
+    );
     if sb
         .post_to_thread(channel_id, &thread_id, "ferb-user-proxy", goal)
         .await
         .is_ok()
     {
+        println!("[trace] post_initial_goal_with_retry: initial post succeeded thread_id={}", thread_id);
         return Ok(thread_id);
     }
 
@@ -271,10 +276,18 @@ async fn post_initial_goal_with_retry(
         .await
         .map_err(|e| anyhow::anyhow!("Could not create define-goal thread on retry: {}", e))?;
 
+    println!(
+        "[trace] post_initial_goal_with_retry: retry thread created thread_id={}",
+        new_thread.id
+    );
     state
         .thread_ids
         .insert("define-goal".to_string(), new_thread.id.clone());
 
+    println!(
+        "[trace] post_initial_goal_with_retry: posting to retry thread channel_id={} thread_id={}",
+        channel_id, new_thread.id
+    );
     sb.post_to_thread(channel_id, &new_thread.id, "ferb-user-proxy", goal)
         .await
         .map_err(|e| {
@@ -285,6 +298,7 @@ async fn post_initial_goal_with_retry(
             )
         })?;
 
+    println!("[trace] post_initial_goal_with_retry: retry post succeeded thread_id={}", new_thread.id);
     Ok(new_thread.id)
 }
 
@@ -310,10 +324,22 @@ async fn run_define_goal_phase(
             return Ok(());
         }
     };
+    println!(
+        "[trace] run_define_goal_phase: received channel_id={} thread_id={}",
+        channel_id, thread_id
+    );
 
     // Post the initial task description — must succeed before the reviewer runs.
+    println!(
+        "[trace] run_define_goal_phase: calling post_initial_goal_with_retry with channel_id={} thread_id={}",
+        channel_id, thread_id
+    );
     let thread_id =
         post_initial_goal_with_retry(sb, goal, state, &channel_id, thread_id).await?;
+    println!(
+        "[trace] run_define_goal_phase: active thread_id after initial post={}",
+        thread_id
+    );
 
     for _iteration in 0..MAX_DEFINE_GOAL_ITERATIONS {
         // Reviewer reads the thread and posts a question or refined-goal summary.
@@ -368,6 +394,7 @@ async fn setup_define_goal_channel(
             return None;
         }
     };
+    println!("[trace] setup_define_goal_channel: channel_id={}", channel.id);
 
     let thread = match sb
         .create_thread(&channel.id, &format!("Define Goal: {}", goal), "ferb-moderator")
@@ -379,6 +406,7 @@ async fn setup_define_goal_channel(
             return None;
         }
     };
+    println!("[trace] setup_define_goal_channel: thread_id={}", thread.id);
 
     state
         .channel_ids
@@ -387,6 +415,10 @@ async fn setup_define_goal_channel(
         .thread_ids
         .insert("define-goal".to_string(), thread.id.clone());
 
+    println!(
+        "[trace] setup_define_goal_channel: stored channel_id={} thread_id={}",
+        channel.id, thread.id
+    );
     Some((channel.id, thread.id))
 }
 
