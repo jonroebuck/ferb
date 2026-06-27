@@ -97,6 +97,14 @@ fn compose_cmd(ferb_dir: &Path) -> Command {
     cmd
 }
 
+fn docker_compose_pull(ferb_dir: &Path) -> anyhow::Result<()> {
+    let status = compose_cmd(ferb_dir).arg("pull").status()?;
+    if !status.success() {
+        anyhow::bail!("docker compose pull failed");
+    }
+    Ok(())
+}
+
 fn docker_compose_up(ferb_dir: &Path) -> anyhow::Result<()> {
     let status = compose_cmd(ferb_dir).args(["up", "-d"]).status()?;
     if !status.success() {
@@ -108,8 +116,6 @@ fn docker_compose_up(ferb_dir: &Path) -> anyhow::Result<()> {
 fn wait_for_services(ferb_dir: &Path) -> anyhow::Result<()> {
     let start = Instant::now();
     let timeout = Duration::from_secs(60);
-
-    println!("Waiting for services to be ready...");
 
     loop {
         let output = compose_cmd(ferb_dir)
@@ -189,7 +195,7 @@ fn ensure_secret(
     Ok(())
 }
 
-fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
+fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     check_docker()?;
 
     std::fs::create_dir_all(ferb_dir.join("secrets"))?;
@@ -230,7 +236,13 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
     ensure_secret(ferb_dir, "OPENAI_API_KEY", false)?;
     ensure_secret(ferb_dir, "GEMINI_API_KEY", false)?;
 
+    if !no_pull {
+        println!("[info] Pulling latest images...");
+        docker_compose_pull(ferb_dir)?;
+    }
+    println!("[info] Starting services...");
     docker_compose_up(ferb_dir)?;
+    println!("[info] Waiting for services to be healthy...");
     wait_for_services(ferb_dir)?;
 
     let config = crate::load_config()?;
@@ -240,12 +252,18 @@ fn cmd_up_interactive(ferb_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_up_ci(ferb_dir: &Path) -> anyhow::Result<()> {
+fn cmd_up_ci(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     check_docker()?;
     ensure_compose_file(ferb_dir)?;
     ensure_workflows(ferb_dir)?;
 
+    if !no_pull {
+        println!("[info] Pulling latest images...");
+        docker_compose_pull(ferb_dir)?;
+    }
+    println!("[info] Starting services...");
     docker_compose_up(ferb_dir)?;
+    println!("[info] Waiting for services to be healthy...");
     wait_for_services(ferb_dir)?;
 
     let switchboard_url =
@@ -256,12 +274,12 @@ fn cmd_up_ci(ferb_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn cmd_up() -> anyhow::Result<()> {
+pub fn cmd_up(no_pull: bool) -> anyhow::Result<()> {
     let ferb_dir = crate::ferb_dir();
     if is_interactive() {
-        cmd_up_interactive(&ferb_dir)
+        cmd_up_interactive(&ferb_dir, no_pull)
     } else {
-        cmd_up_ci(&ferb_dir)
+        cmd_up_ci(&ferb_dir, no_pull)
     }
 }
 

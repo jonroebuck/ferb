@@ -33,7 +33,11 @@ struct RunArgs {
 #[derive(Subcommand)]
 enum Command {
     /// First-time setup wizard and start services
-    Up,
+    Up {
+        /// Skip pulling latest images (start faster with cached images)
+        #[arg(long)]
+        no_pull: bool,
+    },
     /// Start all services (docker compose up -d)
     Start,
     /// Stop all services (docker compose down)
@@ -133,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Command::Up) => setup::cmd_up(),
+        Some(Command::Up { no_pull }) => setup::cmd_up(no_pull),
         Some(Command::Start) => setup::cmd_start(),
         Some(Command::Stop) => setup::cmd_stop(),
         Some(Command::Status) => setup::cmd_status(),
