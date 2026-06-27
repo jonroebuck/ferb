@@ -89,6 +89,7 @@ impl SwitchboardClient {
     }
 
     pub async fn create_channel(&self, name: &str) -> anyhow::Result<Channel> {
+        eprintln!("[info] Switchboard: creating channel \"{}\"", name);
         let url = format!("{}/api/v1/channels", self.base_url);
         let body = serde_json::json!({ "name": name, "description": "" });
         let resp = self.http.post(&url).json(&body).send().await?;
@@ -97,10 +98,16 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("create_channel error ({}): {}", code, text);
         }
-        Ok(resp.json().await?)
+        let ch: Channel = resp.json().await?;
+        eprintln!("[info] Switchboard: channel created id={}", ch.id);
+        Ok(ch)
     }
 
     pub async fn create_thread(&self, channel_id: Uuid, title: &str) -> anyhow::Result<Thread> {
+        eprintln!(
+            "[info] Switchboard: creating thread \"{}\" in channel {}",
+            title, channel_id
+        );
         let url = format!("{}/api/v1/channels/{}/threads", self.base_url, channel_id);
         let body = serde_json::json!({ "title": title, "author": "ferb" });
         let resp = self.http.post(&url).json(&body).send().await?;
@@ -109,7 +116,9 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("create_thread error ({}): {}", code, text);
         }
-        Ok(resp.json().await?)
+        let th: Thread = resp.json().await?;
+        eprintln!("[info] Switchboard: thread created id={}", th.id);
+        Ok(th)
     }
 
     pub async fn list_posts(&self, thread_id: Uuid) -> anyhow::Result<Vec<Post>> {
@@ -129,6 +138,10 @@ impl SwitchboardClient {
         author: &str,
         content: &str,
     ) -> anyhow::Result<Post> {
+        eprintln!(
+            "[info] Switchboard: posting to thread {} as {}: \"{}\"",
+            thread_id, author, content
+        );
         let url = format!("{}/api/v1/threads/{}/posts", self.base_url, thread_id);
         let body = serde_json::json!({ "author": author, "content": content });
         let resp = self.http.post(&url).json(&body).send().await?;
@@ -137,10 +150,13 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("post_to_thread error ({}): {}", code, text);
         }
-        Ok(resp.json().await?)
+        let post: Post = resp.json().await?;
+        eprintln!("[info] Switchboard: post created id={}", post.id);
+        Ok(post)
     }
 
     pub async fn create_issue(&self, title: &str) -> anyhow::Result<Issue> {
+        eprintln!("[info] Switchboard: creating issue \"{}\"", title);
         let url = format!("{}/api/v1/issues", self.base_url);
         let body = serde_json::json!({ "title": title, "description": "" });
         let resp = self.http.post(&url).json(&body).send().await?;
@@ -149,11 +165,14 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("create_issue error ({}): {}", code, text);
         }
-        Ok(resp.json().await?)
+        let issue: Issue = resp.json().await?;
+        eprintln!("[info] Switchboard: issue created id={}", issue.id);
+        Ok(issue)
     }
 
     /// PATCH /api/v1/issues/{id}/status
     pub async fn update_issue_status(&self, id: Uuid, status: &str) -> anyhow::Result<()> {
+        eprintln!("[info] Switchboard: updating issue {} status to {}", id, status);
         let url = format!("{}/api/v1/issues/{}/status", self.base_url, id);
         let body = serde_json::json!({ "status": status });
         let resp = self.http.patch(&url).json(&body).send().await?;

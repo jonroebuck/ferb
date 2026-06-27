@@ -214,6 +214,85 @@ async fn test_get_issue() {
     assert_eq!(issue.status, IssueStatus::InProgress);
 }
 
+// ── test_channel_thread_post_flow ─────────────────────────────────────────
+
+#[tokio::test]
+async fn test_channel_thread_post_flow() {
+    let server = MockServer::start().await;
+
+    let ch_id: Uuid = "110e8400-e29b-41d4-a716-446655440000".parse().unwrap();
+    let th_id: Uuid = "220e8400-e29b-41d4-a716-446655440001".parse().unwrap();
+    let post_id: Uuid = "330e8400-e29b-41d4-a716-446655440002".parse().unwrap();
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/channels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(channel_json(ch_id, "ferb-general")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/channels/{}/threads", ch_id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(thread_json(th_id, ch_id, "Define Goal: test task")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/threads/{}/posts", th_id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(post_json(post_id, "ferb-user-proxy", "Build a todo app")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = SwitchboardClient::new(&server.uri());
+
+    // Step 1 & 2: create channel, assert id returned
+    let ch = client.create_channel("ferb-general").await.unwrap_or_else(|e| {
+        panic!(
+            "create_channel failed\nSent: POST /api/v1/channels body={{\"name\":\"ferb-general\"}}\nError: {}",
+            e
+        )
+    });
+    assert_eq!(
+        ch.id, ch_id,
+        "create_channel: received id={} but expected id={}",
+        ch.id, ch_id
+    );
+
+    // Step 3 & 4: create thread, assert id returned
+    let th = client
+        .create_thread(ch.id, "Define Goal: test task")
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "create_thread failed\nSent: POST /api/v1/channels/{}/threads body={{\"title\":\"Define Goal: test task\"}}\nError: {}",
+                ch.id, e
+            )
+        });
+    assert_eq!(
+        th.id, th_id,
+        "create_thread: received id={} but expected id={}",
+        th.id, th_id
+    );
+
+    // Step 5 & 6: post to thread, assert post id returned
+    let post = client
+        .post_to_thread(th.id, "ferb-user-proxy", "Build a todo app")
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "post_to_thread failed\nSent: POST /api/v1/threads/{}/posts body={{\"author\":\"ferb-user-proxy\",\"content\":\"Build a todo app\"}}\nError: {}",
+                th.id, e
+            )
+        });
+    assert_eq!(
+        post.id, post_id,
+        "post_to_thread: received id={} but expected id={}",
+        post.id, post_id
+    );
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────
 
 #[test]
