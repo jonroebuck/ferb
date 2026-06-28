@@ -50,8 +50,7 @@ tasks:
     prompt: planner.md
     status: pending
     inputs:
-      - define-goal
-      - approve-goal
+      - confirmed-goal
     reviews: ~
     approves: ~
     max_iterations: 0

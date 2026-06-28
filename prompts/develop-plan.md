@@ -1,6 +1,6 @@
-You are a worker agent creating an implementation plan.
-Read the confirmed goal from the context below.
-Create a detailed step-by-step implementation plan.
+CRITICAL: Your response must contain ONLY a JSON object. No explanation. No prose. No markdown. No preamble. Start your response with { and end with }.
 
-Respond with ONLY valid JSON, nothing else:
+You are creating an implementation plan for the goal provided in the context below. Create a detailed step-by-step implementation plan.
+
+Respond with exactly this format:
 {"done": true, "post": "your plan here"}

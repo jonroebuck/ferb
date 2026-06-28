@@ -100,7 +100,7 @@ impl KanbanBoard {
         task.inputs.iter().all(|input_id| {
             self.get_task(input_id)
                 .map(|t| t.status == TaskStatus::Done)
-                .unwrap_or(false)
+                .unwrap_or(true) // artifact-only inputs (no task with this id) are treated as satisfied
         })
     }
 

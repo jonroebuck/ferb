@@ -15,15 +15,28 @@ pub fn sanitize_json_strings(s: &str) -> String {
 }
 
 /// Parse a JSON string into T, stripping code fences first.
-/// Returns a descriptive error including the cleaned input on failure.
+/// Falls back to extracting the first complete `{...}` block from mixed prose+JSON responses.
 pub fn parse_json<T: serde::de::DeserializeOwned>(s: &str) -> anyhow::Result<T> {
     let cleaned = clean_json(s);
     let sanitized = sanitize_json_strings(cleaned);
-    serde_json::from_str(&sanitized).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to parse JSON: {}\nCleaned input was:\n{}",
-            e,
-            &sanitized[..sanitized.len().min(500)]
-        )
-    })
+
+    if let Ok(val) = serde_json::from_str::<T>(&sanitized) {
+        return Ok(val);
+    }
+
+    // Extract first JSON object from prose+JSON mixed responses
+    if let (Some(start), Some(end)) = (cleaned.find('{'), cleaned.rfind('}')) {
+        if end > start {
+            let candidate = sanitize_json_strings(&cleaned[start..=end]);
+            if let Ok(val) = serde_json::from_str::<T>(&candidate) {
+                eprintln!("[warn] parse_json: extracted JSON from mixed prose response");
+                return Ok(val);
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "Failed to parse JSON: all parse attempts failed\nCleaned input was:\n{}",
+        &sanitized[..sanitized.len().min(500)]
+    ))
 }

@@ -705,6 +705,7 @@ fn store_raw_goal(state: &mut FerbState, goal: &str) {
         "define-goal",
         serde_json::json!({ "original_task": goal, "refined_goal": goal }),
     );
+    state.set_artifact("confirmed-goal", serde_json::Value::String(goal.to_string()));
     if let Some(t) = state.kanban_board.get_task_mut("define-goal") {
         t.status = TaskStatus::Done;
     }
@@ -1073,6 +1074,10 @@ pub async fn run_task(
     if state.kanban_board.get_task("define-goal").is_some() {
         println!("=== Define Goal ===\n");
         run_define_goal_phase(&mut state, &sb, &reviewer, goal).await?;
+        if let Some(map) = state.artifacts.as_object() {
+            let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+            println!("[trace] FerbState artifacts after define-goal: {:?}", keys);
+        }
     } else {
         // Legacy seed: no define-goal task, seed the goal via message channel.
         state.send_message("user", "ferb-reviewer", "define-goal", goal);
