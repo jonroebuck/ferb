@@ -176,7 +176,7 @@ async fn switchboard_post_agent_completion(
         ts, agent, task_name, task_id, status
     );
     if let Err(e) = sb
-        .post_to_thread(&run.channel_id, &run.thread_id, "system", &content)
+        .post_to_thread(&run.thread_id, "system", &content)
         .await
     {
         eprintln!("[warn] Switchboard: failed to post agent completion: {}", e);
@@ -194,7 +194,7 @@ async fn switchboard_finish_success(
     }
 
     if let Err(e) = sb
-        .post_to_thread(&run.channel_id, &run.thread_id, "system", &summary)
+        .post_to_thread(&run.thread_id, "system", &summary)
         .await
     {
         eprintln!(
@@ -218,7 +218,7 @@ async fn switchboard_finish_failure(
 ) {
     let content = format!("Ferb run failed: {}", error);
     if let Err(e) = sb
-        .post_to_thread(&run.channel_id, &run.thread_id, "system", &content)
+        .post_to_thread(&run.thread_id, "system", &content)
         .await
     {
         eprintln!("[warn] Switchboard: failed to post error details: {}", e);
@@ -262,7 +262,7 @@ async fn post_initial_goal_with_retry(
         channel_id, thread_id
     );
     if sb
-        .post_to_thread(channel_id, &thread_id, "ferb-user-proxy", goal)
+        .post_to_thread(&thread_id, "ferb-user-proxy", goal)
         .await
         .is_ok()
     {
@@ -288,7 +288,7 @@ async fn post_initial_goal_with_retry(
         "[trace] post_initial_goal_with_retry: posting to retry thread channel_id={} thread_id={}",
         channel_id, new_thread.id
     );
-    sb.post_to_thread(channel_id, &new_thread.id, "ferb-user-proxy", goal)
+    sb.post_to_thread(&new_thread.id, "ferb-user-proxy", goal)
         .await
         .map_err(|e| {
             anyhow::anyhow!(
@@ -344,7 +344,7 @@ async fn run_define_goal_phase(
     for _iteration in 0..MAX_DEFINE_GOAL_ITERATIONS {
         // Reviewer reads the thread and posts a question or refined-goal summary.
         match reviewer
-            .analyze_define_goal_thread(sb, &channel_id, &thread_id)
+            .analyze_define_goal_thread(sb, &thread_id)
             .await
         {
             Ok((done, post)) => {
@@ -356,18 +356,18 @@ async fn run_define_goal_phase(
                 .to_string();
 
                 let _ = sb
-                    .post_to_thread(&channel_id, &thread_id, "ferb-reviewer", &envelope)
+                    .post_to_thread(&thread_id, "ferb-reviewer", &envelope)
                     .await
                     .map_err(|e| eprintln!("[warn] Failed to post reviewer response: {}", e));
 
                 println!("\n[ferb-reviewer]\n{}\n", post);
 
                 if done {
-                    if handle_summary_confirmation(sb, &channel_id, &thread_id, state, goal, &post).await? {
+                    if handle_summary_confirmation(sb, &thread_id, state, goal, &post).await? {
                         return Ok(());
                     }
                 } else {
-                    collect_and_post_answer(sb, &channel_id, &thread_id).await?;
+                    collect_and_post_answer(sb, &thread_id).await?;
                 }
             }
             Err(e) => {
@@ -436,7 +436,6 @@ fn store_raw_goal(state: &mut FerbState, goal: &str) {
 /// Returns true when the user confirms and the goal is stored.
 async fn handle_summary_confirmation(
     sb: &ferb_core::SwitchboardClient,
-    channel_id: &str,
     thread_id: &str,
     state: &mut FerbState,
     original_goal: &str,
@@ -451,7 +450,6 @@ async fn handle_summary_confirmation(
     if input == "yes" || input == "y" {
         let _ = sb
             .post_to_thread(
-                channel_id,
                 thread_id,
                 "ferb-user-proxy",
                 &serde_json::json!({
@@ -475,17 +473,14 @@ async fn handle_summary_confirmation(
         }
 
         // Post a status update to the progress thread if it exists.
-        if let Some(run_channel) = state.channel_ids.get("progress") {
-            if let Some(run_thread) = state.thread_ids.get("progress") {
-                let _ = sb
-                    .post_to_thread(
-                        run_channel,
-                        run_thread,
-                        "system",
-                        "Define Goal card complete — goal confirmed by user.",
-                    )
-                    .await;
-            }
+        if let Some(run_thread) = state.thread_ids.get("progress") {
+            let _ = sb
+                .post_to_thread(
+                    run_thread,
+                    "system",
+                    "Define Goal card complete — goal confirmed by user.",
+                )
+                .await;
         }
 
         println!("\n✓ Goal confirmed.\n");
@@ -507,7 +502,6 @@ async fn handle_summary_confirmation(
 
     let _ = sb
         .post_to_thread(
-            channel_id,
             thread_id,
             "ferb-user-proxy",
             &serde_json::json!({ "type": "status", "content": reply }).to_string(),
@@ -520,7 +514,6 @@ async fn handle_summary_confirmation(
 /// Ask for the user's answer to a reviewer question and post it to the thread.
 async fn collect_and_post_answer(
     sb: &ferb_core::SwitchboardClient,
-    channel_id: &str,
     thread_id: &str,
 ) -> anyhow::Result<()> {
     print!("Your answer: ");
@@ -531,7 +524,7 @@ async fn collect_and_post_answer(
 
     if !answer.is_empty() {
         let _ = sb
-            .post_to_thread(channel_id, thread_id, "ferb-user-proxy", answer)
+            .post_to_thread(thread_id, "ferb-user-proxy", answer)
             .await
             .map_err(|e| eprintln!("[warn] Failed to post answer: {}", e));
     }

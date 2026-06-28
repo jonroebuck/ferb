@@ -88,7 +88,7 @@ async fn test_agent_completion_posted_to_channel() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path("/api/v1/channels/ch-1/threads/th-1/posts"))
+        .and(path("/api/v1/threads/th-1/posts"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(post_json("post-1", "agent completed")),
@@ -100,7 +100,7 @@ async fn test_agent_completion_posted_to_channel() {
     let client = SwitchboardClient::new(&server.uri());
 
     let post = client
-        .post_to_thread("ch-1", "th-1", "system", "agent completed")
+        .post_to_thread("th-1", "system", "agent completed")
         .await
         .unwrap();
     assert_eq!(post.id, "post-1");
@@ -436,7 +436,7 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     // Agent completions + final summary: post to thread
     Mock::given(method("POST"))
-        .and(path("/api/v1/channels/ch-3/threads/th-3/posts"))
+        .and(path("/api/v1/threads/th-3/posts"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(post_json("post-x", "update")),
         )
@@ -466,7 +466,6 @@ async fn test_full_lifecycle_with_agent_completions() {
     // 2. Agent completions
     client
         .post_to_thread(
-            &run_state.channel_id,
             &run_state.thread_id,
             "system",
             "Agent: ferb-reviewer | Task: define-goal | Status: Done",
@@ -476,7 +475,6 @@ async fn test_full_lifecycle_with_agent_completions() {
 
     client
         .post_to_thread(
-            &run_state.channel_id,
             &run_state.thread_id,
             "system",
             "Agent: ferb-worker | Task: make-plan | Status: ReadyForReview",
@@ -487,7 +485,6 @@ async fn test_full_lifecycle_with_agent_completions() {
     // 3. Finish success
     client
         .post_to_thread(
-            &run_state.channel_id,
             &run_state.thread_id,
             "system",
             "Ferb run completed successfully.",

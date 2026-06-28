@@ -218,18 +218,14 @@ impl SwitchboardClient {
 
     pub async fn post_to_thread(
         &self,
-        channel_id: &str,
         thread_id: &str,
         author: &str,
         content: &str,
     ) -> anyhow::Result<PostResponse> {
-        let url = format!(
-            "{}/api/v1/channels/{}/threads/{}/posts",
-            self.base_url, channel_id, thread_id
-        );
+        let url = format!("{}/api/v1/threads/{}/posts", self.base_url, thread_id);
         println!(
-            "[trace] post_to_thread: POST {} (channel_id={}, thread_id={}, author={})",
-            url, channel_id, thread_id, author
+            "[trace] post_to_thread: POST {} (thread_id={}, author={})",
+            url, thread_id, author
         );
         let body = CreatePostRequest {
             author: author.to_string(),
@@ -248,13 +244,9 @@ impl SwitchboardClient {
 
     pub async fn list_thread_posts(
         &self,
-        channel_id: &str,
         thread_id: &str,
     ) -> anyhow::Result<Vec<PostResponse>> {
-        let url = format!(
-            "{}/api/v1/channels/{}/threads/{}/posts",
-            self.base_url, channel_id, thread_id
-        );
+        let url = format!("{}/api/v1/threads/{}/posts", self.base_url, thread_id);
         let resp = self.http.get(&url).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();

@@ -131,11 +131,10 @@ impl Reviewer {
     pub async fn analyze_define_goal_thread(
         &self,
         sb: &CoreSwitchboardClient,
-        channel_id: &str,
         thread_id: &str,
     ) -> anyhow::Result<(bool, String)> {
         let posts = sb
-            .list_thread_posts(channel_id, thread_id)
+            .list_thread_posts(thread_id)
             .await
             .unwrap_or_default();
 
