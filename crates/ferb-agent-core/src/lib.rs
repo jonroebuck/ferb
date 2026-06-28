@@ -202,12 +202,12 @@ impl SwitchboardClient {
         Ok(issue)
     }
 
-    /// PATCH /api/v1/issues/{id}/status
+    /// PUT /api/v1/issues/{id}/status
     pub async fn update_issue_status(&self, id: Uuid, status: &str) -> anyhow::Result<()> {
         eprintln!("[info] Switchboard: updating issue {} status to {}", id, status);
         let url = format!("{}/api/v1/issues/{}/status", self.base_url, id);
         let body = serde_json::json!({ "status": status });
-        let resp = self.http.patch(&url).json(&body).send().await?;
+        let resp = self.http.put(&url).json(&body).send().await?;
         if !resp.status().is_success() {
             let code = resp.status();
             let text = resp.text().await.unwrap_or_default();

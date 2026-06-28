@@ -123,7 +123,9 @@ impl FerbAgent for Worker {
     fn system_prompt(&self) -> &str {
         "You are a worker agent that implements solutions to software tasks. \
          Read the thread history and implement or continue the current task. \
-         Respond with valid JSON only: {\"done\": true/false, \"post\": \"your implementation notes or completed work\"}"
+         You MUST respond with ONLY valid JSON. No prose, no explanation, no markdown. \
+         Your entire response must start with { and end with }. \
+         Example response: {\"done\": true, \"post\": \"your content here\"}"
     }
 }
 

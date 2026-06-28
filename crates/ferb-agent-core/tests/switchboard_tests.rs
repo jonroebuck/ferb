@@ -186,9 +186,9 @@ async fn test_create_issue() {
 async fn test_update_issue_status() {
     let server = MockServer::start().await;
     let id = test_uuid();
-    Mock::given(method("PATCH"))
+    Mock::given(method("PUT"))
         .and(path(format!("/api/v1/issues/{}/status", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(id, "My task", "done")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": id, "status": "done"})))
         .expect(1)
         .mount(&server)
         .await;

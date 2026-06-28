@@ -165,7 +165,7 @@ impl SwitchboardClient {
         let body = UpdateIssueRequest {
             status: status.to_string(),
         };
-        let resp = self.http.patch(&url).json(&body).send().await?;
+        let resp = self.http.put(&url).json(&body).send().await?;
         if !resp.status().is_success() {
             let code = resp.status();
             let text = resp.text().await.unwrap_or_default();

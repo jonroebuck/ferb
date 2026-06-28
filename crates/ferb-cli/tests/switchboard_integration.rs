@@ -41,7 +41,7 @@ async fn test_run_start_creates_issue_and_channel() {
         .mount(&server)
         .await;
 
-    Mock::given(method("PATCH"))
+    Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-1/status"))
         .respond_with(
             ResponseTemplate::new(200)
@@ -110,7 +110,7 @@ async fn test_agent_completion_posted_to_channel() {
 async fn test_issue_transitions_to_done_on_success() {
     let server = MockServer::start().await;
 
-    Mock::given(method("PATCH"))
+    Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-1/status"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-1", "my task", "done")),
@@ -129,7 +129,7 @@ async fn test_issue_transitions_to_done_on_success() {
 async fn test_issue_transitions_to_blocked_on_failure() {
     let server = MockServer::start().await;
 
-    Mock::given(method("PATCH"))
+    Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-1/status"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-1", "my task", "blocked")),
@@ -160,7 +160,7 @@ async fn test_channel_flag_reuses_existing_channel() {
     // No channel creation mock — if create_channel is called, wiremock returns 404
     // which would cause an error.
 
-    Mock::given(method("PATCH"))
+    Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-2/status"))
         .respond_with(
             ResponseTemplate::new(200)
@@ -416,7 +416,7 @@ async fn test_full_lifecycle_with_agent_completions() {
         .await;
 
     // Start: transition to in_progress, then later to done
-    Mock::given(method("PATCH"))
+    Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-3/status"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(issue_json("iss-3", "full test", "done")),

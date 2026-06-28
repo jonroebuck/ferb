@@ -50,6 +50,7 @@ tasks:
     prompt: planner.md
     status: pending
     inputs:
+      - define-goal
       - approve-goal
     reviews: ~
     approves: ~
