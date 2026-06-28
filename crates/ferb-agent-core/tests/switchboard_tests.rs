@@ -19,9 +19,10 @@ fn issue_json(id: Uuid, title: &str, status: &str) -> serde_json::Value {
     serde_json::json!({ "id": id, "title": title, "status": status })
 }
 
-fn post_json(id: Uuid, author: &str, content: &str) -> serde_json::Value {
+fn post_json(id: Uuid, thread_id: Uuid, author: &str, content: &str) -> serde_json::Value {
     serde_json::json!({
         "id": id,
+        "thread_id": thread_id,
         "author": author,
         "content": content,
         "created_at": "2026-01-01T00:00:00Z"
@@ -121,7 +122,7 @@ async fn test_list_posts() {
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/threads/{}/posts", th_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            post_json(post_id, "ferb-user-proxy", "Build a todo app")
+            post_json(post_id, th_id, "ferb-user-proxy", "Build a todo app")
         ])))
         .expect(1)
         .mount(&server)
@@ -145,7 +146,7 @@ async fn test_post_to_thread() {
     Mock::given(method("POST"))
         .and(path(format!("/api/v1/threads/{}/posts", th_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(
-            post_json(post_id, "ferb-reviewer", r#"{"done":false,"post":"looks good"}"#),
+            post_json(post_id, th_id, "ferb-reviewer", r#"{"done":false,"post":"looks good"}"#),
         ))
         .expect(1)
         .mount(&server)
@@ -240,7 +241,7 @@ async fn test_channel_thread_post_flow() {
 
     Mock::given(method("POST"))
         .and(path(format!("/api/v1/threads/{}/posts", th_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(post_json(post_id, "ferb-user-proxy", "Build a todo app")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(post_json(post_id, th_id, "ferb-user-proxy", "Build a todo app")))
         .expect(1)
         .mount(&server)
         .await;
