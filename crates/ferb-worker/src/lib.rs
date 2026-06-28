@@ -75,7 +75,13 @@ impl Worker {
 
         let mut context = format!("## Task: {}\n\n", task.name);
         for input_id in &task.inputs {
-            if let Some(artifact) = state.get_artifact(input_id) {
+            let artifact = state.get_artifact(input_id);
+            println!(
+                "[trace] develop-plan reading input: {} -> {:?}",
+                input_id,
+                artifact.is_some()
+            );
+            if let Some(artifact) = artifact {
                 context.push_str(&format!(
                     "### Input: {}\n{}\n\n",
                     input_id,

@@ -748,6 +748,15 @@ async fn handle_summary_confirmation(
             }),
         );
 
+        state.set_artifact(
+            "confirmed-goal",
+            serde_json::Value::String(refined_content.to_string()),
+        );
+        println!(
+            "[trace] stored confirmed-goal artifact: {} chars",
+            refined_content.len()
+        );
+
         if let Some(t) = state.kanban_board.get_task_mut("define-goal") {
             t.status = TaskStatus::Done;
         }
