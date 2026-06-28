@@ -8,8 +8,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Post {
     pub id: Uuid,
+    pub thread_id: Uuid,
+    #[serde(default)]
     pub author: String,
+    #[serde(default)]
     pub content: String,
+    #[serde(default)]
     pub created_at: String,
 }
 
