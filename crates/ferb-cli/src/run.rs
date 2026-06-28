@@ -126,7 +126,7 @@ async fn build_input_context(
             for post in &posts {
                 ctx.push_str(&format!("[{}]: {}\n", post.author, post.content));
             }
-            ctx.push_str("\n");
+            ctx.push('\n');
         }
     }
     ctx
