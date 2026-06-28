@@ -300,12 +300,14 @@ fn test_format_thread_history() {
     let posts = vec![
         Post {
             id: test_uuid(),
+            thread_id: Uuid::new_v4(),
             author: "ferb-user-proxy".to_string(),
             content: "Build a todo app".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
         },
         Post {
             id: "660e8400-e29b-41d4-a716-446655440001".parse().unwrap(),
+            thread_id: Uuid::new_v4(),
             author: "ferb-reviewer".to_string(),
             content: "What framework?".to_string(),
             created_at: "2026-01-01T00:01:00Z".to_string(),
