@@ -22,12 +22,20 @@ pub struct Thread {
     pub id: Uuid,
     pub channel_id: Uuid,
     pub title: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,6 +52,14 @@ pub struct Issue {
     pub id: Uuid,
     pub title: String,
     pub status: IssueStatus,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub assignee: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 /// Everything an agent needs to process one workflow card.
