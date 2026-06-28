@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use ferb_agent_core::{FerbAgent, SwitchboardClient};
-use ferb_core::{FerbState, KanbanComment, SwitchboardClient as CoreSwitchboardClient, TaskStatus, TramwayClient};
+use ferb_agent_core::{FerbAgent, SwitchboardClient, Uuid};
+use ferb_core::{FerbState, KanbanComment, TaskStatus, TramwayClient};
 use serde::Deserialize;
 
 fn prompts_dir() -> PathBuf {
@@ -130,13 +130,13 @@ impl Reviewer {
     /// `done: false` means the reviewer has a question for the user.
     pub async fn analyze_define_goal_thread(
         &self,
-        sb: &CoreSwitchboardClient,
+        sb: &SwitchboardClient,
         thread_id: &str,
     ) -> anyhow::Result<(bool, String)> {
-        let posts = sb
-            .list_thread_posts(thread_id)
-            .await
-            .unwrap_or_default();
+        let tid: Uuid = thread_id
+            .parse()
+            .map_err(|_| anyhow::anyhow!("analyze_define_goal_thread: invalid thread_id={}", thread_id))?;
+        let posts = sb.list_posts(tid).await.unwrap_or_default();
 
         let context = build_thread_context(&posts);
         let system_prompt = load_prompt("define-goal-reviewer.md")?;
@@ -154,7 +154,7 @@ impl Reviewer {
     }
 }
 
-fn build_thread_context(posts: &[ferb_core::PostResponse]) -> String {
+fn build_thread_context(posts: &[ferb_agent_core::Post]) -> String {
     let mut ctx = String::from("## Thread History\n\n");
     for post in posts {
         let display = extract_inner_content(&post.content);
@@ -275,12 +275,13 @@ mod tests {
         assert!(!resp.post.is_empty());
     }
 
-    fn make_post(author: &str, content: &str) -> ferb_core::PostResponse {
-        ferb_core::PostResponse {
-            id: "test-id".to_string(),
+    fn make_post(author: &str, content: &str) -> ferb_agent_core::Post {
+        ferb_agent_core::Post {
+            id: ferb_agent_core::Uuid::nil(),
+            thread_id: ferb_agent_core::Uuid::nil(),
             author: author.to_string(),
             content: content.to_string(),
-            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
         }
     }
 

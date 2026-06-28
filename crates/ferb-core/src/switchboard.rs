@@ -13,6 +13,14 @@ pub struct IssueResponse {
     pub id: String,
     pub title: String,
     pub status: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub assignee: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -43,9 +51,13 @@ struct CreatePostRequest {
 pub struct PostResponse {
     pub id: String,
     #[serde(default)]
+    pub thread_id: String,
+    #[serde(default)]
     pub author: String,
+    #[serde(default)]
     pub content: String,
-    pub timestamp: String,
+    #[serde(default, alias = "timestamp")]
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,7 +150,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard create_issue error ({}): {}", status, text);
         }
-        Ok(resp.json().await?)
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] create_issue raw response: {}", String::from_utf8_lossy(&bytes));
+        serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("create_issue deserialize error: {}", e))
     }
 
     pub async fn transition_issue(
@@ -175,7 +190,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard create_channel error ({}): {}", status, text);
         }
-        Ok(resp.json().await?)
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] create_channel raw response: {}", String::from_utf8_lossy(&bytes));
+        serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("create_channel deserialize error: {}", e))
     }
 
     pub async fn create_artifact(&self, name: &str) -> anyhow::Result<ArtifactResponse> {
@@ -211,7 +229,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard create_thread error ({}): {}", status, text);
         }
-        let thread: ThreadResponse = resp.json().await?;
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] create_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        let thread: ThreadResponse = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("create_thread deserialize error: {}", e))?;
         println!("[trace] create_thread: returned thread_id={}", thread.id);
         Ok(thread)
     }
@@ -237,7 +258,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Switchboard post_to_thread error ({}): {}", status, text);
         }
-        let post: PostResponse = resp.json().await?;
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] post_to_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        let post: PostResponse = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("post_to_thread deserialize error: {}", e))?;
         println!("[trace] post_to_thread: returned post_id={}", post.id);
         Ok(post)
     }
