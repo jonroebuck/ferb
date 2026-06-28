@@ -118,7 +118,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("create_channel error ({}): {}", code, text);
         }
-        let ch: Channel = resp.json().await?;
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] create_channel raw response: {}", String::from_utf8_lossy(&bytes));
+        let ch: Channel = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("create_channel deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: channel created id={}", ch.id);
         Ok(ch)
     }
@@ -136,7 +139,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("create_thread error ({}): {}", code, text);
         }
-        let th: Thread = resp.json().await?;
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] create_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        let th: Thread = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("create_thread deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: thread created id={}", th.id);
         Ok(th)
     }
@@ -170,7 +176,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("post_to_thread error ({}): {}", code, text);
         }
-        let post: Post = resp.json().await?;
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] post_to_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        let post: Post = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("post_to_thread deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: post created id={}", post.id);
         Ok(post)
     }
@@ -185,7 +194,10 @@ impl SwitchboardClient {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("create_issue error ({}): {}", code, text);
         }
-        let issue: Issue = resp.json().await?;
+        let bytes = resp.bytes().await?;
+        eprintln!("[trace] create_issue raw response: {}", String::from_utf8_lossy(&bytes));
+        let issue: Issue = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("create_issue deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: issue created id={}", issue.id);
         Ok(issue)
     }
