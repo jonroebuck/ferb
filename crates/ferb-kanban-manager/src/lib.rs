@@ -55,6 +55,8 @@ mod tests {
                 content: "We have 5 tasks for this sprint.".to_string(),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
             }],
+            input_context: String::new(),
+            prompt: None,
         }
     }
 

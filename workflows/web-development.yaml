@@ -4,19 +4,33 @@ description: Build web pages and frontend applications
 channels:
   - name: general
     threads:
-      - name: define-goal
       - name: progress
       - name: artifacts
 
 cards:
   - title: define-goal
     agents: [ferb-reviewer, ferb-user-proxy]
+    outputs:
+      - confirmed-goal
 
   - title: develop-plan
     agents: [ferb-worker, ferb-reviewer]
+    inputs:
+      - confirmed-goal
+    outputs:
+      - implementation-plan
 
   - title: create-artifact
     agents: [ferb-worker, ferb-reviewer]
+    inputs:
+      - confirmed-goal
+      - implementation-plan
+    outputs:
+      - artifact
 
   - title: review-artifact
     agents: [ferb-reviewer, ferb-approver]
+    inputs:
+      - artifact
+    outputs:
+      - reviewed-artifact

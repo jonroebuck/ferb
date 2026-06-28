@@ -2,7 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ferb_agent_core::{SwitchboardClient, Uuid};
+use ferb_agent_core::{CardContext, CardWorkflow, FerbAgent, RunState, SwitchboardClient, Uuid};
 use ferb_approver::Approver;
 use ferb_core::{FerbState, KanbanBoard, KanbanTask, TaskStatus};
 use ferb_moderator::Moderator;
@@ -10,6 +10,7 @@ use ferb_reviewer::Reviewer;
 use ferb_user_proxy::UserProxy;
 use ferb_worker::Worker;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 use crate::FerbConfig;
 
@@ -57,16 +58,14 @@ fn default_pass_budget() -> usize {
 }
 
 #[derive(Debug, Deserialize)]
-struct WorkflowDef {
+struct TaskWorkflowDef {
     #[allow(dead_code)]
     workflow: String,
     tasks: Vec<WorkflowTaskDef>,
 }
 
-fn load_workflow(path: &str) -> anyhow::Result<KanbanBoard> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("Failed to load workflow {}: {}", path, e))?;
-    let def: WorkflowDef = serde_yaml::from_str(&content)?;
+fn load_kanban_from_str(content: &str) -> anyhow::Result<KanbanBoard> {
+    let def: TaskWorkflowDef = serde_yaml::from_str(content)?;
 
     let tasks = def
         .tasks
@@ -91,6 +90,282 @@ fn load_workflow(path: &str) -> anyhow::Result<KanbanBoard> {
 
     Ok(KanbanBoard { tasks })
 }
+
+// ── Card-based workflow pipeline ───────────────────────────────────────────
+
+fn is_card_workflow(content: &str) -> bool {
+    serde_yaml::from_str::<serde_json::Value>(content)
+        .map(|v| v.get("cards").is_some())
+        .unwrap_or(false)
+}
+
+fn card_prompts_dir() -> std::path::PathBuf {
+    std::env::var("FERB_PROMPTS_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("./prompts"))
+}
+
+fn load_card_prompt(card_title: &str) -> Option<String> {
+    let path = card_prompts_dir().join(format!("{}.md", card_title));
+    std::fs::read_to_string(&path).ok()
+}
+
+async fn build_input_context(
+    sb: &SwitchboardClient,
+    inputs: &[String],
+    output_threads: &HashMap<String, Uuid>,
+) -> String {
+    if inputs.is_empty() {
+        return String::new();
+    }
+    let mut ctx = String::from("## Context from previous cards\n\n");
+    for input_name in inputs {
+        if let Some(&tid) = output_threads.get(input_name) {
+            let posts = sb.list_posts(tid).await.unwrap_or_default();
+            ctx.push_str(&format!("### {}\n", input_name));
+            for post in &posts {
+                ctx.push_str(&format!("[{}]: {}\n", post.author, post.content));
+            }
+            ctx.push_str("\n");
+        }
+    }
+    ctx
+}
+
+/// Run the define-goal interactive phase and post the confirmed goal to each
+/// named output thread.
+async fn run_define_goal_card(
+    goal: &str,
+    run_state: &mut RunState,
+    sb: &SwitchboardClient,
+    reviewer: &Reviewer,
+    outputs: &[String],
+) -> anyhow::Result<()> {
+    let board = KanbanBoard {
+        tasks: vec![KanbanTask {
+            id: "define-goal".to_string(),
+            name: "Define Goal".to_string(),
+            agent: "ferb-user-proxy".to_string(),
+            prompt: None,
+            status: TaskStatus::Pending,
+            inputs: vec![],
+            reviews: None,
+            approves: None,
+            max_iterations: 10,
+            iterations_used: 0,
+            questions: vec![],
+            comments: vec![],
+            success_criteria: vec![],
+            pass_budget: 3,
+        }],
+    };
+    let mut state = FerbState::new(board);
+    state
+        .channel_ids
+        .insert("general".to_string(), run_state.channel_id.to_string());
+
+    run_define_goal_phase(&mut state, sb, reviewer, goal).await?;
+
+    // Post the confirmed goal JSON to each output thread.
+    if let Some(artifact) = state.get_artifact("define-goal") {
+        let content = serde_json::to_string_pretty(artifact).unwrap_or_default();
+        if let Some(refined) = artifact.get("refined_goal").and_then(|v| v.as_str()) {
+            run_state.confirmed_goal = Some(refined.to_string());
+        }
+        for output_name in outputs {
+            if let Some(&tid) = run_state.output_threads.get(output_name) {
+                if let Err(e) = sb.post_to_thread(tid, "ferb-reviewer", &content).await {
+                    eprintln!("[warn] Failed to post goal to '{}' thread: {}", output_name, e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_card_pipeline(
+    workflow: &CardWorkflow,
+    goal: &str,
+    run_state: &mut RunState,
+    sb: &SwitchboardClient,
+    tramway: &ferb_core::TramwayClient,
+    worker: &Worker,
+    reviewer: &Reviewer,
+) -> anyhow::Result<()> {
+    for card in &workflow.cards {
+        println!("\n=== {} ===\n", card.title);
+
+        // Create output threads before running so inputs from later cards can be wired up.
+        for output_name in &card.outputs {
+            let thread = sb
+                .create_thread(run_state.channel_id, output_name)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to create output thread '{}': {}", output_name, e)
+                })?;
+            run_state.output_threads.insert(output_name.clone(), thread.id);
+        }
+
+        // define-goal runs an interactive conversation; handled separately.
+        if card.title == "define-goal" {
+            run_define_goal_card(goal, run_state, sb, reviewer, &card.outputs).await?;
+            continue;
+        }
+
+        // Build context string from all input threads.
+        let input_context =
+            build_input_context(sb, &card.inputs, &run_state.output_threads).await;
+
+        // Load a card-specific system prompt (e.g. prompts/develop-plan.md).
+        let prompt = load_card_prompt(&card.title);
+
+        // Create a Switchboard issue to track this card.
+        let card_issue = sb.create_issue(&card.title).await.map_err(|e| {
+            anyhow::anyhow!("Failed to create issue for card '{}': {}", card.title, e)
+        })?;
+
+        // Create a working thread for the card.
+        let card_thread = sb
+            .create_thread(run_state.channel_id, &card.title)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to create thread for card '{}': {}", card.title, e)
+            })?;
+
+        let context = CardContext {
+            card: card_issue,
+            thread_id: card_thread.id,
+            channel_id: run_state.channel_id,
+            posts: vec![],
+            input_context,
+            prompt,
+        };
+
+        let primary_agent = card.agents.first().map(String::as_str).unwrap_or("ferb-worker");
+        let resp = match primary_agent {
+            "ferb-worker" => worker.run(context, tramway).await?,
+            "ferb-reviewer" => reviewer.run(context, tramway).await?,
+            unknown => {
+                eprintln!("[warn] Unknown agent '{}' for card '{}', skipping", unknown, card.title);
+                continue;
+            }
+        };
+
+        eprintln!(
+            "[info] Card '{}' done={} post={}",
+            card.title,
+            resp.done,
+            &resp.post[..resp.post.len().min(120)]
+        );
+
+        // Post result to each output thread.
+        for output_name in &card.outputs {
+            if let Some(&tid) = run_state.output_threads.get(output_name) {
+                if let Err(e) = sb.post_to_thread(tid, primary_agent, &resp.post).await {
+                    eprintln!("[warn] Failed to post to output thread '{}': {}", output_name, e);
+                }
+            }
+        }
+
+        // Progress summary to the main thread.
+        let summary = format!("Card '{}' completed.", card.title);
+        if let Err(e) = sb.post_to_thread(run_state.thread_id, "system", &summary).await {
+            eprintln!("[warn] Failed to post progress: {}", e);
+        }
+    }
+    Ok(())
+}
+
+async fn run_card_workflow_task(
+    goal: &str,
+    channel_id: Option<&str>,
+    wf_content: &str,
+    config: &FerbConfig,
+) -> anyhow::Result<()> {
+    let workflow: CardWorkflow = serde_yaml::from_str(wf_content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse card workflow: {}", e))?;
+
+    let sb_url = &config.switchboard.url;
+    let tw_url = &config.tramway.url;
+    let model = &config.tramway.model;
+
+    let sb = SwitchboardClient::new(sb_url);
+    let reviewer = Reviewer::new(sb_url, tw_url, model);
+    let worker = Worker::new(sb_url, tw_url, model);
+    let tramway = ferb_core::TramwayClient::new(tw_url, model);
+
+    sb.health_check().await.map_err(|e| {
+        anyhow::anyhow!("Error: {}\nRun 'ferb up' to start all required services.", e)
+    })?;
+
+    println!("\n=== Ferb ===\n");
+
+    let issue = sb.create_issue(goal).await.map_err(|e| {
+        anyhow::anyhow!("Switchboard setup failed — create_issue: {}", e)
+    })?;
+
+    let ch_id_str = if let Some(id) = channel_id {
+        id.to_string()
+    } else {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let slug = slugify(goal);
+        let name = format!("ferb-{}-{}", ts, slug);
+        sb.create_channel(&name)
+            .await
+            .map(|ch| ch.id.to_string())
+            .map_err(|e| anyhow::anyhow!("Switchboard setup failed — create_channel: {}", e))?
+    };
+
+    let ch_uuid: Uuid = ch_id_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid channel_id: {}", ch_id_str))?;
+
+    if let Err(e) = sb.update_issue_status(issue.id, "in_progress").await {
+        eprintln!("[warn] Switchboard: failed to transition issue: {}", e);
+    }
+
+    let progress_thread = sb
+        .create_thread(ch_uuid, &format!("Ferb: {}", goal))
+        .await
+        .map_err(|e| anyhow::anyhow!("Switchboard setup failed — create_thread: {}", e))?;
+
+    let mut run_state = RunState {
+        channel_id: ch_uuid,
+        thread_id: progress_thread.id,
+        issue_id: issue.id,
+        output_threads: HashMap::new(),
+        confirmed_goal: None,
+    };
+
+    let result =
+        run_card_pipeline(&workflow, goal, &mut run_state, &sb, &tramway, &worker, &reviewer)
+            .await;
+
+    match &result {
+        Ok(()) => {
+            let _ = sb
+                .post_to_thread(run_state.thread_id, "system", "Workflow completed successfully.")
+                .await;
+            if let Err(e) = sb.update_issue_status(run_state.issue_id, "done").await {
+                eprintln!("[warn] Switchboard: failed to transition issue to done: {}", e);
+            }
+        }
+        Err(e) => {
+            let msg = format!("Workflow failed: {}", e);
+            let _ = sb.post_to_thread(run_state.thread_id, "system", &msg).await;
+            if let Err(e2) = sb.update_issue_status(run_state.issue_id, "blocked").await {
+                eprintln!("[warn] Switchboard: failed to transition issue to blocked: {}", e2);
+            }
+        }
+    }
+
+    result
+}
+
+// ── Task-based pipeline (legacy default.yaml) ─────────────────────────────
 
 fn slugify(s: &str) -> String {
     s.to_lowercase()
@@ -757,15 +1032,22 @@ pub async fn run_task(
         .or_else(|| std::env::var("FERB_WORKFLOW").ok())
         .unwrap_or_else(|| config.workflow.default.clone());
     let wf_path = expand_tilde(&wf_raw);
-    let wf_path_str = wf_path.to_string_lossy();
-    let kanban_board = load_workflow(&wf_path_str)?;
+    let wf_content = std::fs::read_to_string(&wf_path)
+        .map_err(|e| anyhow::anyhow!("Failed to load workflow {}: {}", wf_path.display(), e))?;
+
+    // Card-based workflow (web-development.yaml style with `cards:` key).
+    if is_card_workflow(&wf_content) {
+        return run_card_workflow_task(goal, channel_id, &wf_content, config).await;
+    }
+
+    // Legacy task-based pipeline.
+    let kanban_board = load_kanban_from_str(&wf_content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse workflow {}: {}", wf_path.display(), e))?;
 
     let mut state = FerbState::new(kanban_board);
 
-    if let Ok(wf_content) = std::fs::read_to_string(&wf_path) {
-        if let Ok(wf_val) = serde_yaml::from_str::<serde_json::Value>(&wf_content) {
-            state.active_workflow = Some(wf_val);
-        }
+    if let Ok(wf_val) = serde_yaml::from_str::<serde_json::Value>(&wf_content) {
+        state.active_workflow = Some(wf_val);
     }
 
     // ── Switchboard health check ──────────────────────────────────────────

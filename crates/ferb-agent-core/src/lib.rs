@@ -2,6 +2,7 @@ pub use uuid::Uuid;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,12 @@ pub struct CardContext {
     pub channel_id: Uuid,
     /// Full thread history in chronological order.
     pub posts: Vec<Post>,
+    /// Pre-formatted context from input threads (empty when no inputs).
+    #[serde(default)]
+    pub input_context: String,
+    /// Optional system prompt override for this card (falls back to agent default).
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,29 +247,97 @@ pub fn format_thread_history(posts: &[Post]) -> String {
 
 pub fn parse_agent_response(raw: &str) -> anyhow::Result<AgentResponse> {
     let s = raw.trim();
+    // Strip markdown code fences if present
     let s = s
         .strip_prefix("```json")
         .or_else(|| s.strip_prefix("```"))
         .map(|t| t.trim_start_matches('\n').trim_end_matches("```").trim())
         .unwrap_or(s);
-    serde_json::from_str(s)
-        .map_err(|e| anyhow::anyhow!("Failed to parse AgentResponse: {}\nRaw: {}", e, raw))
+    // Direct parse
+    if let Ok(resp) = serde_json::from_str::<AgentResponse>(s) {
+        return Ok(resp);
+    }
+    // Extract first complete JSON object from mixed prose+JSON responses
+    if let (Some(start), Some(end)) = (s.find('{'), s.rfind('}')) {
+        if end > start {
+            if let Ok(resp) = serde_json::from_str::<AgentResponse>(&s[start..=end]) {
+                eprintln!("[warn] parse_agent_response: extracted JSON from mixed prose response");
+                return Ok(resp);
+            }
+        }
+    }
+    Err(anyhow::anyhow!("Failed to parse AgentResponse from: {}", raw))
 }
+
+// ── Workflow types (card-based YAML) ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowCard {
+    pub title: String,
+    pub agents: Vec<String>,
+    #[serde(default)]
+    pub inputs: Vec<String>,
+    #[serde(default)]
+    pub outputs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowThreadDef {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowChannelDef {
+    pub name: String,
+    #[serde(default)]
+    pub threads: Vec<WorkflowThreadDef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CardWorkflow {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub channels: Vec<WorkflowChannelDef>,
+    #[serde(default)]
+    pub cards: Vec<WorkflowCard>,
+}
+
+// ── Run state ──────────────────────────────────────────────────────────────
+
+pub struct RunState {
+    pub channel_id: Uuid,
+    pub thread_id: Uuid,
+    pub issue_id: Uuid,
+    /// Maps output thread name → Switchboard thread ID.
+    pub output_threads: HashMap<String, Uuid>,
+    pub confirmed_goal: Option<String>,
+}
+
+// ── FerbAgent Trait ────────────────────────────────────────────────────────
 
 #[async_trait]
 pub trait FerbAgent: Send + Sync {
     fn agent_name(&self) -> &str;
     fn system_prompt(&self) -> &str;
 
-    /// Default implementation: format thread history, call Tramway, parse
+    /// Default implementation: build user message from input context + thread
+    /// history, call Tramway with the card prompt (or agent default), parse
     /// the LLM response as AgentResponse JSON.
     async fn run(
         &self,
         context: CardContext,
         tramway: &ferb_core::TramwayClient,
     ) -> anyhow::Result<AgentResponse> {
-        let history = format_thread_history(&context.posts);
-        let raw = tramway.complete(self.system_prompt(), &history).await?;
+        let system = context.prompt.as_deref().unwrap_or(self.system_prompt());
+        let mut user_msg = String::new();
+        if !context.input_context.is_empty() {
+            user_msg.push_str(&context.input_context);
+            user_msg.push_str("\n\n");
+        }
+        user_msg.push_str(&format_thread_history(&context.posts));
+        let raw = tramway.complete(system, &user_msg).await?;
         parse_agent_response(&raw)
     }
 }

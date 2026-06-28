@@ -93,6 +93,8 @@ mod tests {
                 content: r#"{"done": true, "post": "All tasks complete."}"#.to_string(),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
             }],
+            input_context: String::new(),
+            prompt: None,
         }
     }
 

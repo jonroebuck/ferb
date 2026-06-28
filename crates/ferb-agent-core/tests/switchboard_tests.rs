@@ -334,3 +334,11 @@ fn test_parse_agent_response_strips_markdown_fence() {
     assert!(resp.done);
     assert_eq!(resp.post, "approved");
 }
+
+#[test]
+fn test_parse_agent_response_extracts_from_mixed_prose() {
+    let raw = "Here is my analysis:\n{\"done\": true, \"post\": \"implementation complete\"}\nThat concludes my response.";
+    let resp = parse_agent_response(raw).unwrap();
+    assert!(resp.done);
+    assert_eq!(resp.post, "implementation complete");
+}
