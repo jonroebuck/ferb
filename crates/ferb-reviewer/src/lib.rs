@@ -18,22 +18,6 @@ fn load_prompt(filename: &str) -> anyhow::Result<String> {
 }
 
 #[derive(Debug, Deserialize)]
-struct ReviewerResponse {
-    #[serde(default)]
-    pub kanban_update: Option<KanbanUpdate>,
-    #[serde(default)]
-    pub artifacts: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct KanbanUpdate {
-    pub task_id: String,
-    pub status: String,
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct DefineGoalLlmResponse {
     pub done: bool,
     pub post: String,
@@ -95,31 +79,14 @@ impl Reviewer {
 
         let context = build_context(state, task_id);
         let raw = self.tramway.complete(&system_prompt, &context).await?;
-        let response: ReviewerResponse = ferb_utils::parse_json(&raw)?;
 
-        if let Some(update) = &response.kanban_update {
-            let new_status = match update.status.as_str() {
-                "ready_for_review" => TaskStatus::ReadyForReview,
-                "done" => TaskStatus::Done,
-                "in_progress" => TaskStatus::InProgress,
-                _ => TaskStatus::InProgress,
-            };
-            if let Some(t) = state.kanban_board.get_task_mut(task_id) {
-                t.status = new_status;
-                if let Some(comment) = &update.comment {
-                    t.comments.push(KanbanComment {
-                        from: task_id.to_string(),
-                        content: comment.clone(),
-                        pass: state.pass,
-                    });
-                }
-            }
-        }
-
-        if let Some(serde_json::Value::Object(map)) = response.artifacts {
-            for (key, value) in map {
-                state.set_artifact(&key, value);
-            }
+        if let Some(t) = state.kanban_board.get_task_mut(task_id) {
+            t.status = TaskStatus::Done;
+            t.comments.push(KanbanComment {
+                from: task_id.to_string(),
+                content: raw.trim().to_string(),
+                pass: state.pass,
+            });
         }
 
         Ok(())
@@ -183,11 +150,11 @@ fn build_context(state: &FerbState, task_id: &str) -> String {
     ctx.push_str("## Input Artifacts\n");
     for input_id in &task.inputs {
         if let Some(artifact) = state.get_artifact(input_id) {
-            ctx.push_str(&format!(
-                "### {}\n{}\n\n",
-                input_id,
-                serde_json::to_string_pretty(artifact).unwrap_or_default()
-            ));
+            let content = match artifact {
+                serde_json::Value::String(s) => s.clone(),
+                other => serde_json::to_string_pretty(other).unwrap_or_default(),
+            };
+            ctx.push_str(&format!("### {}\n{}\n\n", input_id, content));
         }
     }
 

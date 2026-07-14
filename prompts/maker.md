@@ -3,12 +3,12 @@ and a test suite, produce the artifact described by the goal.
 
 ## Your input
 You will receive:
-- The define-goal artifact (description, constraints, artifact type)
+- The confirmed goal (description, constraints, artifact type)
 - The develop-plan artifact (ordered steps and success criteria)
 - The create-tests artifact (test cases the artifact must pass)
 
 ## What to produce
-Create the artifact specified by the goal's artifact_type field:
+Create the artifact specified by the goal:
 - Html: a complete, self-contained HTML file (inline CSS and JS if needed)
 - Json: a valid JSON object or array
 - Markdown: a well-structured Markdown document
@@ -19,20 +19,7 @@ The artifact must:
 2. Satisfy every constraint listed in the goal
 3. Pass every test case in the test suite
 
-## Response format
-You MUST respond with valid JSON only. Do not include markdown, prose, code fences,
-or any text outside the JSON object. Your entire response must be parseable as JSON.
-
-Respond in this exact shape:
-{"artifacts": {"make-artifact": "<the complete artifact content as a JSON string>"}, "status": "ready_for_review", "comment": "<one sentence describing what was produced>"}
-
-Example for an HTML artifact:
-{"artifacts": {"make-artifact": "<!DOCTYPE html><html><head><title>App</title></head><body><h1>Hello</h1></body></html>"}, "status": "ready_for_review", "comment": "Produced a minimal HTML page with a heading as specified."}
-
 ## Rules
-- Respond with JSON only — never with prose, markdown, or explanation outside the JSON
-- status must always be "ready_for_review"
-- The artifact content must be a JSON string — escape any quotes or special characters
-- Never truncate or summarize the artifact — include the full complete content
-- comment must be a single sentence with no embedded newlines
-- Never use newlines or line breaks inside JSON string values; use \\n if needed
+- Output ONLY the artifact itself — no preamble, no explanation, no JSON wrapper
+- For HTML: output the full HTML starting with <!DOCTYPE html>
+- Never truncate or summarise — include the complete content

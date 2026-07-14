@@ -13,23 +13,9 @@ Verify ALL of the following:
 4. The plan covers all constraints from the goal
 5. There are no conflicting or contradictory steps
 
-## Decision
-- If ALL criteria are met: set status to "done"
-- If ANY criterion is unmet: set status to "in_progress" and describe exactly
-  what is wrong or missing in the comment
+## Your response
+Write a plain text review. State your conclusion clearly:
+- If all criteria are met: state that the plan is approved and ready for test creation
+- If any criterion is unmet: describe exactly what is wrong or missing
 
-## Response format
-You MUST respond with valid JSON only. Do not include markdown, prose, code fences,
-or any text outside the JSON object. Your entire response must be parseable as JSON.
-
-When the plan meets all criteria:
-{"kanban_update": {"task_id": "review-plan", "status": "done", "comment": "Plan is complete, ordered, and all criteria are measurable."}, "artifacts": null}
-
-When the plan needs improvement:
-{"kanban_update": {"task_id": "review-plan", "status": "in_progress", "comment": "Step 3 is vague: 'implement logic' does not specify what logic. Rewrite with specific actions."}, "artifacts": null}
-
-## Rules
-- Respond with JSON only — never with prose, markdown, or explanation outside the JSON
-- task_id must always be exactly "review-plan"
-- status must be exactly "done" or "in_progress"
-- comment must be a single string with no embedded newlines
+Write your review directly — no JSON, no outer code fences.

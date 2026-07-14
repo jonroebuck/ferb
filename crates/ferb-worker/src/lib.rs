@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use ferb_agent_core::{FerbAgent, SwitchboardClient};
-use ferb_core::{FerbState, KanbanComment, TaskStatus, TramwayClient};
-use serde::Deserialize;
+use ferb_core::{FerbState, TaskStatus, TramwayClient};
 
 fn prompts_dir() -> PathBuf {
     std::env::var("FERB_PROMPTS_DIR")
@@ -15,16 +14,6 @@ fn load_prompt(filename: &str) -> anyhow::Result<String> {
     let path = prompts_dir().join(filename);
     std::fs::read_to_string(&path)
         .map_err(|e| anyhow::anyhow!("Failed to load prompt {}: {}", path.display(), e))
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkerResponse {
-    #[serde(default)]
-    pub artifacts: Option<serde_json::Value>,
-    #[serde(default)]
-    pub comment: Option<String>,
-    #[serde(default)]
-    pub status: Option<String>,
 }
 
 pub struct Worker {
@@ -76,44 +65,21 @@ impl Worker {
         let mut context = format!("## Task: {}\n\n", task.name);
         for input_id in &task.inputs {
             let artifact = state.get_artifact(input_id);
-            println!(
-                "[trace] develop-plan reading input: {} -> {:?}",
-                input_id,
-                artifact.is_some()
-            );
+            println!("[trace] {} reading input: {} -> {}", task_id, input_id, artifact.is_some());
             if let Some(artifact) = artifact {
-                context.push_str(&format!(
-                    "### Input: {}\n{}\n\n",
-                    input_id,
-                    serde_json::to_string_pretty(artifact).unwrap_or_default()
-                ));
+                let content = match artifact {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => serde_json::to_string_pretty(other).unwrap_or_default(),
+                };
+                context.push_str(&format!("### Input: {}\n{}\n\n", input_id, content));
             }
         }
 
         let raw = self.tramway.complete(&system_prompt, &context).await?;
-        let response: WorkerResponse = ferb_utils::parse_json(&raw)?;
-
-        if let Some(serde_json::Value::Object(map)) = &response.artifacts {
-            for (key, value) in map {
-                state.set_artifact(key, value.clone());
-            }
-        }
-
-        let new_status = match response.status.as_deref() {
-            Some("ready_for_review") => TaskStatus::ReadyForReview,
-            Some("failed") => TaskStatus::Failed,
-            _ => TaskStatus::ReadyForReview,
-        };
+        state.set_artifact(task_id, serde_json::Value::String(raw.trim().to_string()));
 
         if let Some(t) = state.kanban_board.get_task_mut(task_id) {
-            t.status = new_status;
-            if let Some(comment) = response.comment {
-                t.comments.push(KanbanComment {
-                    from: task_id.to_string(),
-                    content: comment,
-                    pass: state.pass,
-                });
-            }
+            t.status = TaskStatus::ReadyForReview;
         }
 
         Ok(())
@@ -129,9 +95,7 @@ impl FerbAgent for Worker {
     fn system_prompt(&self) -> &str {
         "You are a worker agent that implements solutions to software tasks. \
          Read the thread history and implement or continue the current task. \
-         You MUST respond with ONLY valid JSON. No prose, no explanation, no markdown. \
-         Your entire response must start with { and end with }. \
-         Example response: {\"done\": true, \"post\": \"your content here\"}"
+         Respond with ONLY valid JSON: {\"done\": true, \"post\": \"your content here\"}"
     }
 }
 
