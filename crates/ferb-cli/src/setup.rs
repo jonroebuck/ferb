@@ -5,8 +5,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const BUNDLED_COMPOSE: &str = include_str!("../docker-compose.yml");
-const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../workflows/default.yaml");
-const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../workflows/web-development.yaml");
+const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../../../workflows/default.yaml");
+const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../../../workflows/web-development.yaml");
 
 const SECRET_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
 
