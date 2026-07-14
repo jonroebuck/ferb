@@ -218,6 +218,7 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
             tramway: crate::TramwayToml {
                 url: tramway_url,
                 model: "claude/claude-sonnet-4-6".to_string(),
+                max_tokens: 16384,
             },
             workflow: crate::WorkflowToml { default: default_wf },
         };

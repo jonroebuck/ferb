@@ -92,7 +92,7 @@ tasks:
     prompt: test-planner.md
     status: pending
     inputs:
-      - approve-plan
+      - develop-plan
     reviews: ~
     approves: ~
     max_iterations: 0
@@ -134,8 +134,8 @@ tasks:
     prompt: maker.md
     status: pending
     inputs:
-      - approve-plan
-      - approve-tests
+      - develop-plan
+      - create-tests
     reviews: ~
     approves: ~
     max_iterations: 0
@@ -149,6 +149,9 @@ tasks:
     prompt: artifact-reviewer.md
     status: pending
     inputs:
+      - confirmed-goal
+      - develop-plan
+      - create-tests
       - make-artifact
     reviews: make-artifact
     approves: ~
@@ -166,4 +169,48 @@ tasks:
       - review-artifact
     reviews: ~
     approves: make-artifact
+    max_iterations: 0
+
+  # Data file phase (secondary artifact — runs in parallel with artifact review/approve)
+  - id: make-data-file
+    name: Make Data File
+    agent: ferb-worker
+    prompt: maker-data.md
+    status: pending
+    inputs:
+      - develop-plan
+      - create-tests
+    reviews: ~
+    approves: ~
+    max_iterations: 0
+    success_criteria:
+      - Data file matches the structure specified in the plan
+      - Data file content is complete and accurate
+
+  - id: review-data-file
+    name: Review Data File
+    agent: ferb-reviewer
+    prompt: artifact-reviewer.md
+    status: pending
+    inputs:
+      - confirmed-goal
+      - develop-plan
+      - create-tests
+      - make-data-file
+    reviews: make-data-file
+    approves: ~
+    max_iterations: 3
+    success_criteria:
+      - Data file meets all success criteria from the plan
+      - All test cases would pass against this data file
+
+  - id: approve-data-file
+    name: Approve Data File
+    agent: ferb-approver
+    status: pending
+    inputs:
+      - make-data-file
+      - review-data-file
+    reviews: ~
+    approves: make-data-file
     max_iterations: 0

@@ -290,9 +290,9 @@ async fn run_card_workflow_task(
     let model = &config.tramway.model;
 
     let sb = SwitchboardClient::new(sb_url);
-    let reviewer = Reviewer::new(sb_url, tw_url, model);
-    let worker = Worker::new(sb_url, tw_url, model);
-    let tramway = ferb_core::TramwayClient::new(tw_url, model);
+    let reviewer = Reviewer::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
+    let worker = Worker::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
+    let tramway = ferb_core::TramwayClient::new(tw_url, model).with_max_tokens(config.tramway.max_tokens);
 
     sb.health_check().await.map_err(|e| {
         anyhow::anyhow!("Error: {}\nRun 'ferb up' to start all required services.", e)
@@ -363,6 +363,124 @@ async fn run_card_workflow_task(
     }
 
     result
+}
+
+// ── Artifact filesystem write ──────────────────────────────────────────────
+
+fn detect_extension(content: &str) -> &'static str {
+    let t = content.trim_start();
+    // Fast path: content starts directly with the artifact.
+    if t.starts_with("<!DOCTYPE") || t.starts_with("<!doctype") || t.starts_with("<html") {
+        return "html";
+    }
+    if t.starts_with('{') || t.starts_with('[') {
+        return "json";
+    }
+    // Slow path: LLM may have emitted reasoning prose before the artifact.
+    // Search the first 2000 chars for a definitive HTML marker before falling
+    // back to the YAML heuristic (which matches any "key:\n" in prose too).
+    let window = &t[..t.len().min(2000)];
+    if window.contains("<!DOCTYPE ") || window.contains("<!doctype ") || window.contains("\n<html") {
+        return "html";
+    }
+    if t.contains(":\n") || t.starts_with("---") {
+        return "yaml";
+    }
+    "txt"
+}
+
+// Returns true if `line` looks like a YAML mapping key (e.g. "stores:" or "Any Store:").
+fn is_yaml_key_line(line: &str) -> bool {
+    let Some((key, _)) = line.split_once(':') else { return false; };
+    let key = key.trim();
+    !key.is_empty() && !key.contains('\n') && key.len() <= 64
+        && key.chars().all(|c| c.is_alphanumeric() || " _-".contains(c))
+}
+
+/// Strip any leading reasoning prose the LLM may have prepended before the
+/// actual artifact content.  Returns a slice of the original string so no
+/// allocation is needed.
+fn strip_preamble<'a>(content: &'a str, ext: &str) -> &'a str {
+    let t = content.trim_start();
+    match ext {
+        "html" => {
+            if let Some(pos) = t.find("<!DOCTYPE ").or_else(|| t.find("<!doctype ")) {
+                return &t[pos..];
+            }
+            // <html may appear inline; only strip if it starts a line.
+            for (byte_pos, line) in iter_lines_with_pos(t) {
+                if line.trim_start().starts_with("<html") {
+                    return &t[byte_pos..];
+                }
+            }
+            t
+        }
+        "json" => {
+            if let Some(pos) = t.find('{').or_else(|| t.find('[')) {
+                return &t[pos..];
+            }
+            t
+        }
+        "yaml" => {
+            for (byte_pos, line) in iter_lines_with_pos(t) {
+                let trimmed = line.trim_start();
+                if trimmed == "---" || trimmed.starts_with("- ") || is_yaml_key_line(trimmed) {
+                    return &t[byte_pos..];
+                }
+            }
+            t
+        }
+        _ => t,
+    }
+}
+
+fn iter_lines_with_pos(s: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut pos = 0;
+    s.split('\n').map(move |line| {
+        let start = pos;
+        pos += line.len() + 1; // +1 for the '\n'
+        (start, line)
+    })
+}
+
+fn write_artifact_to_disk(
+    state: &FerbState,
+    artifact_id: &str,
+    filename_stem: &str,
+    output_dir: &std::path::Path,
+) {
+    let artifact = match state.get_artifact(artifact_id) {
+        Some(v) => v,
+        None => return,
+    };
+    let raw = match artifact {
+        serde_json::Value::String(s) => s.clone(),
+        other => serde_json::to_string_pretty(other).unwrap_or_default(),
+    };
+    if raw.trim().is_empty() {
+        return;
+    }
+    let ext = detect_extension(&raw);
+    let content = strip_preamble(&raw, ext);
+    if content.trim().is_empty() {
+        eprintln!("[warn] Artifact '{}' is empty after stripping preamble; skipping write", artifact_id);
+        return;
+    }
+    let path = output_dir.join(format!("{}.{}", filename_stem, ext));
+    match std::fs::write(&path, content) {
+        Ok(()) => println!("[info] Artifact written to {}", path.display()),
+        Err(e) => eprintln!("[warn] Failed to write artifact to {}: {}", path.display(), e),
+    }
+}
+
+fn write_artifacts_to_disk(state: &FerbState) {
+    let output_dir = std::path::Path::new("ferb-output");
+    if let Err(e) = std::fs::create_dir_all(output_dir) {
+        eprintln!("[warn] Could not create output directory: {}", e);
+        return;
+    }
+    write_artifact_to_disk(state, "make-artifact", "artifact", output_dir);
+    write_artifact_to_disk(state, "make-data-file", "data-file", output_dir);
 }
 
 // ── Task-based pipeline (legacy default.yaml) ─────────────────────────────
@@ -1033,8 +1151,8 @@ pub async fn run_task(
     let sb = SwitchboardClient::new(sb_url);
     let moderator = Moderator::new(sb_url);
     let user_proxy = UserProxy::new(sb_url);
-    let reviewer = Reviewer::new(sb_url, tw_url, model);
-    let worker = Worker::new(sb_url, tw_url, model);
+    let reviewer = Reviewer::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
+    let worker = Worker::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
     let approver = Approver::new(sb_url);
 
     let wf_raw = workflow_path
@@ -1107,6 +1225,10 @@ pub async fn run_task(
     };
 
     let result = run_pipeline(&mut state, &agents).await;
+
+    if result.is_ok() {
+        write_artifacts_to_disk(&state);
+    }
 
     match &result {
         Ok(()) => switchboard_finish_success(&sb, &sb_run, &state).await,

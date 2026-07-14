@@ -68,6 +68,7 @@ pub(crate) struct SwitchboardConfig {
 pub(crate) struct TramwayConfig {
     pub url: String,
     pub model: String,
+    pub max_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +98,7 @@ pub(crate) struct SwitchboardToml {
 pub(crate) struct TramwayToml {
     pub url: String,
     pub model: String,
+    pub max_tokens: u32,
 }
 
 #[derive(Serialize)]
@@ -122,6 +124,7 @@ pub(crate) fn load_config() -> anyhow::Result<FerbConfig> {
         .set_default("switchboard.url", "http://localhost:4080")?
         .set_default("tramway.url", "http://localhost:8080")?
         .set_default("tramway.model", "claude/claude-sonnet-4-6")?
+        .set_default("tramway.max_tokens", 16384)?
         .set_default("workflow.default", default_workflow)?
         .add_source(config::File::from(ferb_dir().join("ferb.toml")).required(false))
         .set_override_option("switchboard.url", std::env::var("SWITCHBOARD_URL").ok())?

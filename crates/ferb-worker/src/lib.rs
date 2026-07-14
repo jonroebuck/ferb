@@ -29,6 +29,11 @@ impl Worker {
         }
     }
 
+    pub fn with_max_tokens(mut self, n: u32) -> Self {
+        self.tramway = self.tramway.with_max_tokens(n);
+        self
+    }
+
     pub async fn run_legacy(&self, state: &mut FerbState, task_id: &str) -> anyhow::Result<()> {
         let task = match state.kanban_board.get_task(task_id) {
             Some(t) => t.clone(),
