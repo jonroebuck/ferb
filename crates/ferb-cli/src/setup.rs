@@ -160,14 +160,8 @@ fn ensure_compose_file(ferb_dir: &Path) -> anyhow::Result<()> {
 fn ensure_workflows(ferb_dir: &Path) -> anyhow::Result<()> {
     let wf_dir = ferb_dir.join("workflows");
     std::fs::create_dir_all(&wf_dir)?;
-    let default_path = wf_dir.join("default.yaml");
-    if !default_path.exists() {
-        std::fs::write(&default_path, BUNDLED_DEFAULT_WORKFLOW)?;
-    }
-    let web_dev_path = wf_dir.join("web-development.yaml");
-    if !web_dev_path.exists() {
-        std::fs::write(&web_dev_path, BUNDLED_WEB_DEV_WORKFLOW)?;
-    }
+    std::fs::write(wf_dir.join("default.yaml"), BUNDLED_DEFAULT_WORKFLOW)?;
+    std::fs::write(wf_dir.join("web-development.yaml"), BUNDLED_WEB_DEV_WORKFLOW)?;
     Ok(())
 }
 
