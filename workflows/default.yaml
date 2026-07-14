@@ -51,6 +51,7 @@ tasks:
     status: pending
     inputs:
       - confirmed-goal
+      - define-goal
     reviews: ~
     approves: ~
     max_iterations: 0
@@ -178,6 +179,7 @@ tasks:
     prompt: maker-data.md
     status: pending
     inputs:
+      - define-goal
       - develop-plan
       - create-tests
     reviews: ~
@@ -193,6 +195,7 @@ tasks:
     prompt: artifact-reviewer.md
     status: pending
     inputs:
+      - define-goal
       - confirmed-goal
       - develop-plan
       - create-tests
