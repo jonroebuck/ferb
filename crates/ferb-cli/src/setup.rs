@@ -8,6 +8,21 @@ const BUNDLED_COMPOSE: &str = include_str!("../docker-compose.yml");
 const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../../../workflows/default.yaml");
 const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../../../workflows/web-development.yaml");
 
+const BUNDLED_PROMPTS: &[(&str, &str)] = &[
+    ("analyst.md",               include_str!("../../../prompts/analyst.md")),
+    ("artifact-reviewer.md",     include_str!("../../../prompts/artifact-reviewer.md")),
+    ("create-artifact.md",       include_str!("../../../prompts/create-artifact.md")),
+    ("define-goal-reviewer.md",  include_str!("../../../prompts/define-goal-reviewer.md")),
+    ("develop-plan.md",          include_str!("../../../prompts/develop-plan.md")),
+    ("goal-reviewer.md",         include_str!("../../../prompts/goal-reviewer.md")),
+    ("maker-data.md",            include_str!("../../../prompts/maker-data.md")),
+    ("maker.md",                 include_str!("../../../prompts/maker.md")),
+    ("plan-reviewer.md",         include_str!("../../../prompts/plan-reviewer.md")),
+    ("planner.md",               include_str!("../../../prompts/planner.md")),
+    ("test-planner.md",          include_str!("../../../prompts/test-planner.md")),
+    ("test-reviewer.md",         include_str!("../../../prompts/test-reviewer.md")),
+];
+
 const SECRET_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
 
 fn is_interactive() -> bool {
@@ -157,6 +172,15 @@ fn ensure_compose_file(ferb_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_prompts(ferb_dir: &Path) -> anyhow::Result<()> {
+    let prompts_dir = ferb_dir.join("prompts");
+    std::fs::create_dir_all(&prompts_dir)?;
+    for (filename, content) in BUNDLED_PROMPTS {
+        std::fs::write(prompts_dir.join(filename), content)?;
+    }
+    Ok(())
+}
+
 fn ensure_workflows(ferb_dir: &Path) -> anyhow::Result<()> {
     let wf_dir = ferb_dir.join("workflows");
     std::fs::create_dir_all(&wf_dir)?;
@@ -198,6 +222,7 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
 
     ensure_compose_file(ferb_dir)?;
     ensure_workflows(ferb_dir)?;
+    ensure_prompts(ferb_dir)?;
 
     // Config: only write on first run
     let toml_path = ferb_dir.join("ferb.toml");
@@ -253,6 +278,7 @@ fn cmd_up_ci(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     check_docker()?;
     ensure_compose_file(ferb_dir)?;
     ensure_workflows(ferb_dir)?;
+    ensure_prompts(ferb_dir)?;
 
     if !no_pull {
         println!("[info] Pulling latest images...");

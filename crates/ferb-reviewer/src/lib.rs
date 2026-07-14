@@ -6,9 +6,17 @@ use ferb_core::{FerbState, KanbanComment, TaskStatus, TramwayClient};
 use serde::Deserialize;
 
 fn prompts_dir() -> PathBuf {
-    std::env::var("FERB_PROMPTS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("./prompts"))
+    if let Ok(dir) = std::env::var("FERB_PROMPTS_DIR") {
+        return PathBuf::from(dir);
+    }
+    let local = PathBuf::from("./prompts");
+    if local.exists() {
+        return local;
+    }
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".ferb").join("prompts")
 }
 
 fn load_prompt(filename: &str) -> anyhow::Result<String> {
