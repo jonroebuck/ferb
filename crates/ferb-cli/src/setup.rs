@@ -137,11 +137,13 @@ fn wait_for_services(ferb_dir: &Path) -> anyhow::Result<()> {
             }
         }
 
-        if start.elapsed() > timeout {
+        let elapsed = start.elapsed().as_secs();
+        if elapsed >= timeout.as_secs() {
             eprintln!("[warn] Timed out waiting for services — they may still be starting");
             return Ok(());
         }
 
+        println!("[info] Waiting for services... ({}s)", elapsed);
         std::thread::sleep(Duration::from_secs(2));
     }
 }
