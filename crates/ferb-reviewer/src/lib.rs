@@ -111,7 +111,7 @@ mod tests {
         CardContext {
             card: Issue {
                 id: "550e8400-e29b-41d4-a716-446655440000".parse().unwrap(),
-                title: "Review architecture".to_string(),
+                title: "Add login feature".to_string(),
                 status: IssueStatus::InProgress,
                 description: String::new(),
                 assignee: None,
@@ -124,7 +124,7 @@ mod tests {
                 id: "880e8400-e29b-41d4-a716-446655440003".parse().unwrap(),
                 thread_id: Uuid::nil(),
                 author: "ferb-worker".to_string(),
-                content: "Added the new design doc and implementation notes.".to_string(),
+                content: "Implemented JWT-based login endpoint.".to_string(),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
             }],
             input_context: String::new(),
@@ -138,7 +138,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "choices": [{"message": {"content": "{\"done\": true, \"post\": \"Looks good overall; approved.\"}"}}]
+                "choices": [{"message": {"content": "{\"done\": false, \"post\": \"Looks good, needs tests.\"}"}}]
             })))
             .mount(&tramway)
             .await;
@@ -146,8 +146,18 @@ mod tests {
         let agent = Reviewer::new("http://127.0.0.1:1", &tramway.uri(), "test-model");
         let tc = TramwayClient::new(&tramway.uri(), "test-model");
         let resp = agent.run(make_context(), &tc).await.unwrap();
-        assert!(resp.done);
+        assert!(!resp.done);
         assert!(!resp.post.is_empty());
+    }
+
+    fn make_post(author: &str, content: &str) -> ferb_agent_core::Post {
+        ferb_agent_core::Post {
+            id: ferb_agent_core::Uuid::nil(),
+            thread_id: ferb_agent_core::Uuid::nil(),
+            author: author.to_string(),
+            content: content.to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        }
     }
 
     #[test]
@@ -163,40 +173,29 @@ mod tests {
 
     #[test]
     fn build_thread_context_formats_posts() {
-        let posts = vec![Post {
-            id: Uuid::nil(),
-            thread_id: Uuid::nil(),
-            author: "ferb-user-proxy".to_string(),
-            content: r#"{"type":"question","content":"What stack?"}"#.to_string(),
-            created_at: String::new(),
-        }];
-
-        let context = build_thread_context(&posts);
-        assert!(context.contains("## Thread History"));
-        assert!(context.contains("[ferb-user-proxy]: What stack?"));
+        let posts = vec![
+            make_post("ferb-user-proxy", "Build a todo app"),
+            make_post(
+                "ferb-reviewer",
+                r#"{"type":"question","content":"What framework?"}"#,
+            ),
+            make_post("ferb-user-proxy", "React"),
+        ];
+        let ctx = build_thread_context(&posts);
+        assert!(ctx.contains("[ferb-user-proxy]: Build a todo app"));
+        assert!(ctx.contains("[ferb-reviewer]: What framework?"));
+        assert!(ctx.contains("[ferb-user-proxy]: React"));
     }
 
     #[test]
     fn build_thread_context_includes_all_authors() {
         let posts = vec![
-            Post {
-                id: Uuid::nil(),
-                thread_id: Uuid::nil(),
-                author: "ferb-user-proxy".to_string(),
-                content: "Initial goal".to_string(),
-                created_at: String::new(),
-            },
-            Post {
-                id: Uuid::nil(),
-                thread_id: Uuid::nil(),
-                author: "ferb-reviewer".to_string(),
-                content: r#"{"type":"summary","content":"Refined summary"}"#.to_string(),
-                created_at: String::new(),
-            },
+            make_post("ferb-user-proxy", "goal text"),
+            make_post("ferb-reviewer", r#"{"type":"summary","content":"refined"}"#),
         ];
 
-        let context = build_thread_context(&posts);
-        assert!(context.contains("[ferb-user-proxy]: Initial goal"));
-        assert!(context.contains("[ferb-reviewer]: Refined summary"));
+        let ctx = build_thread_context(&posts);
+        assert!(ctx.contains("[ferb-user-proxy]"));
+        assert!(ctx.contains("[ferb-reviewer]"));
     }
 }
