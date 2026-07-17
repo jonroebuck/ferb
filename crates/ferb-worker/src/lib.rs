@@ -42,8 +42,6 @@ struct WorkerResponse {
     pub status: String,
 }
 
-pub struct Worker;
-
 fn extract_content(value: serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s,
