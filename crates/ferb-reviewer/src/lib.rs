@@ -188,28 +188,26 @@ impl Reviewer {
                 write_single_artifact(state, task_id, artifact, response.artifact_file.as_deref())?;
             }
 
-            if let Some(artifacts) = response.artifacts {
-                if let serde_json::Value::Object(map) = artifacts {
-                    for (key, value) in map {
-                        match value {
-                            serde_json::Value::Object(ref obj) => {
-                                let content = obj
-                                    .get("content")
-                                    .or_else(|| obj.get("body"))
-                                    .cloned()
-                                    .map(extract_content)
-                                    .unwrap_or_else(|| serde_json::to_string_pretty(&value).unwrap_or_default());
-                                let file_name = obj
-                                    .get("artifact_file")
-                                    .or_else(|| obj.get("file"))
-                                    .or_else(|| obj.get("path"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or(&key);
-                                state.set_artifact(&key, Some(file_name), content)?;
-                            }
-                            _ => {
-                                state.set_artifact(&key, Some(&key), extract_content(value))?;
-                            }
+            if let Some(serde_json::Value::Object(map)) = response.artifacts {
+                for (key, value) in map {
+                    match value {
+                        serde_json::Value::Object(ref obj) => {
+                            let content = obj
+                                .get("content")
+                                .or_else(|| obj.get("body"))
+                                .cloned()
+                                .map(extract_content)
+                                .unwrap_or_else(|| serde_json::to_string_pretty(&value).unwrap_or_default());
+                            let file_name = obj
+                                .get("artifact_file")
+                                .or_else(|| obj.get("file"))
+                                .or_else(|| obj.get("path"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(&key);
+                            state.set_artifact(&key, Some(file_name), content)?;
+                        }
+                        _ => {
+                            state.set_artifact(&key, Some(&key), extract_content(value))?;
                         }
                     }
                 }
