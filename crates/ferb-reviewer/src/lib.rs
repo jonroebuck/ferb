@@ -31,11 +31,69 @@ struct DefineGoalLlmResponse {
     pub post: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct ReviewerResponse {
+    #[serde(default)]
+    pub kanban_update: Option<KanbanUpdate>,
+    #[serde(default)]
+    pub artifact: Option<serde_json::Value>,
+    #[serde(default)]
+    pub artifact_file: Option<String>,
+    #[serde(default)]
+    pub artifacts: Option<serde_json::Value>,
+}
+
 pub struct Reviewer {
     _sb: SwitchboardClient,
     tramway: TramwayClient,
 }
 
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct KanbanUpdate {
+    pub task_id: String,
+    pub status: String,
+    pub comment: Option<String>,
+}
+
+pub struct Reviewer;
+
+fn extract_content(value: serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s,
+        other => serde_json::to_string_pretty(&other).unwrap_or_default(),
+    }
+}
+
+fn write_single_artifact(
+    state: &mut FerbState,
+    task_id: &str,
+    artifact: serde_json::Value,
+    artifact_file: Option<&str>,
+) -> anyhow::Result<()> {
+    match artifact {
+        serde_json::Value::Object(mut obj) => {
+            let path = obj
+                .remove("artifact_file")
+                .or_else(|| obj.remove("file"))
+                .or_else(|| obj.remove("path"))
+                .and_then(|v| v.as_str().map(|s| s.to_string()));
+
+            let content = obj
+                .remove("content")
+                .or_else(|| obj.remove("body"))
+                .map(extract_content)
+                .unwrap_or_else(|| serde_json::to_string_pretty(&serde_json::Value::Object(obj)).unwrap_or_default());
+
+            state.set_artifact(task_id, path.as_deref().or(artifact_file), content)?;
+        }
+        other => {
+            state.set_artifact(task_id, artifact_file, extract_content(other))?;
+        }
+    }
+
+    Ok(())
+}
 impl Reviewer {
     pub fn new(switchboard_url: &str, tramway_url: &str, model: &str) -> Self {
         Self {
@@ -93,13 +151,71 @@ impl Reviewer {
         let context = build_context(state, task_id);
         let raw = self.tramway.complete(&system_prompt, &context).await?;
 
+        let parsed: Option<ReviewerResponse> = ferb_utils::parse_json(&raw).ok();
+        let new_status = parsed
+            .as_ref()
+            .and_then(|r| r.kanban_update.as_ref())
+            .map(|u| match u.status.as_str() {
+                "ready_for_review" => TaskStatus::ReadyForReview,
+                "done" => TaskStatus::Done,
+                "in_progress" => TaskStatus::InProgress,
+                "failed" => TaskStatus::Failed,
+                _ => TaskStatus::Done,
+            })
+            .unwrap_or(TaskStatus::Done);
+
         if let Some(t) = state.kanban_board.get_task_mut(task_id) {
-            t.status = TaskStatus::Done;
-            t.comments.push(KanbanComment {
-                from: task_id.to_string(),
-                content: raw.trim().to_string(),
-                pass: state.pass,
-            });
+            t.status = new_status;
+            if let Some(comment) = parsed
+                .as_ref()
+                .and_then(|r| r.kanban_update.as_ref())
+                .and_then(|u| u.comment.clone())
+            {
+                t.comments.push(KanbanComment {
+                    from: task_id.to_string(),
+                    content: comment,
+                    pass: state.pass,
+                });
+            } else {
+                t.comments.push(KanbanComment {
+                    from: task_id.to_string(),
+                    content: raw.trim().to_string(),
+                    pass: state.pass,
+                });
+            }
+        }
+
+        if let Some(response) = parsed {
+            if let Some(artifact) = response.artifact {
+                write_single_artifact(state, task_id, artifact, response.artifact_file.as_deref())?;
+            }
+
+            if let Some(artifacts) = response.artifacts {
+                if let serde_json::Value::Object(map) = artifacts {
+                    for (key, value) in map {
+                        match value {
+                            serde_json::Value::Object(obj) => {
+                                let content = obj
+                                    .get("content")
+                                    .or_else(|| obj.get("body"))
+                                    .cloned()
+                                    .map(extract_content)
+                                    .unwrap_or_else(|| serde_json::to_string_pretty(&value).unwrap_or_default());
+                                let file_name = obj
+                                    .get("artifact_file")
+                                    .or_else(|| obj.get("file"))
+                                    .or_else(|| obj.get("path"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(&key);
+                                state.set_artifact(&key, Some(file_name), content)?;
+                            }
+                            _ => {
+                                state.set_artifact(&key, Some(&key), extract_content(value))?;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -163,11 +279,7 @@ fn build_context(state: &FerbState, task_id: &str) -> String {
     ctx.push_str("## Input Artifacts\n");
     for input_id in &task.inputs {
         if let Some(artifact) = state.get_artifact(input_id) {
-            let content = match artifact {
-                serde_json::Value::String(s) => s.clone(),
-                other => serde_json::to_string_pretty(other).unwrap_or_default(),
-            };
-            ctx.push_str(&format!("### {}\n{}\n\n", input_id, content));
+            ctx.push_str(&format!("### {}\n{}\n\n", input_id, artifact));
         }
     }
 
