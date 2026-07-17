@@ -103,12 +103,10 @@ impl SwitchboardClient {
 
     pub async fn health_check(&self) -> anyhow::Result<()> {
         let url = format!("{}/api/v1/schema/channels", self.base_url);
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|_| anyhow::anyhow!("Cannot connect to Switchboard at {}", self.base_url))?;
+        let resp =
+            self.http.get(&url).send().await.map_err(|_| {
+                anyhow::anyhow!("Cannot connect to Switchboard at {}", self.base_url)
+            })?;
         if !resp.status().is_success() {
             anyhow::bail!("Cannot connect to Switchboard at {}", self.base_url);
         }
@@ -126,7 +124,10 @@ impl SwitchboardClient {
             anyhow::bail!("create_channel error ({}): {}", code, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] create_channel raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] create_channel raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         let ch: Channel = serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("create_channel deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: channel created id={}", ch.id);
@@ -147,7 +148,10 @@ impl SwitchboardClient {
             anyhow::bail!("create_thread error ({}): {}", code, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] create_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] create_thread raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         let th: Thread = serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("create_thread deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: thread created id={}", th.id);
@@ -184,7 +188,10 @@ impl SwitchboardClient {
             anyhow::bail!("post_to_thread error ({}): {}", code, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] post_to_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] post_to_thread raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         let post: Post = serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("post_to_thread deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: post created id={}", post.id);
@@ -202,7 +209,10 @@ impl SwitchboardClient {
             anyhow::bail!("create_issue error ({}): {}", code, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] create_issue raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] create_issue raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         let issue: Issue = serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("create_issue deserialize error: {}", e))?;
         eprintln!("[info] Switchboard: issue created id={}", issue.id);
@@ -211,7 +221,10 @@ impl SwitchboardClient {
 
     /// PUT /api/v1/issues/{id}/status
     pub async fn update_issue_status(&self, id: Uuid, status: &str) -> anyhow::Result<()> {
-        eprintln!("[info] Switchboard: updating issue {} status to {}", id, status);
+        eprintln!(
+            "[info] Switchboard: updating issue {} status to {}",
+            id, status
+        );
         let url = format!("{}/api/v1/issues/{}/status", self.base_url, id);
         let body = serde_json::json!({ "status": status });
         let resp = self.http.put(&url).json(&body).send().await?;
@@ -266,7 +279,10 @@ pub fn parse_agent_response(raw: &str) -> anyhow::Result<AgentResponse> {
             }
         }
     }
-    Err(anyhow::anyhow!("Failed to parse AgentResponse from: {}", raw))
+    Err(anyhow::anyhow!(
+        "Failed to parse AgentResponse from: {}",
+        raw
+    ))
 }
 
 // ── Workflow types (card-based YAML) ──────────────────────────────────────

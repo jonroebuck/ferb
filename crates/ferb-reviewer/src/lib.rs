@@ -162,13 +162,14 @@ mod tests {
 
     #[test]
     fn extract_inner_content_unwraps_json() {
-        let raw = r#"{"type":"summary","content":"Refined Goal: Build an app."}"#;
-        assert_eq!(extract_inner_content(raw), "Refined Goal: Build an app.");
+        let content = r#"{"type":"summary","content":"Here is the goal"}"#;
+        assert_eq!(extract_inner_content(content), "Here is the goal");
     }
 
     #[test]
     fn extract_inner_content_falls_back_to_raw() {
-        assert_eq!(extract_inner_content("plain text"), "plain text");
+        let content = "plain text post";
+        assert_eq!(extract_inner_content(content), "plain text post");
     }
 
     #[test]

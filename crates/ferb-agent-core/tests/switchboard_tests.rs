@@ -99,7 +99,9 @@ async fn test_create_thread_sends_author_ferb() {
             "title": "progress",
             "author": "ferb"
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(thread_json(th_id, ch_id, "progress")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(thread_json(th_id, ch_id, "progress")),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -121,9 +123,14 @@ async fn test_list_posts() {
 
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/threads/{}/posts", th_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            post_json(post_id, th_id, "ferb-user-proxy", "Build a todo app")
-        ])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([post_json(
+                post_id,
+                th_id,
+                "ferb-user-proxy",
+                "Build a todo app"
+            )])),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -145,16 +152,23 @@ async fn test_post_to_thread() {
 
     Mock::given(method("POST"))
         .and(path(format!("/api/v1/threads/{}/posts", th_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            post_json(post_id, th_id, "ferb-reviewer", r#"{"done":false,"post":"looks good"}"#),
-        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(post_json(
+            post_id,
+            th_id,
+            "ferb-reviewer",
+            r#"{"done":false,"post":"looks good"}"#,
+        )))
         .expect(1)
         .mount(&server)
         .await;
 
     let client = SwitchboardClient::new(&server.uri());
     let post = client
-        .post_to_thread(th_id, "ferb-reviewer", r#"{"done":false,"post":"looks good"}"#)
+        .post_to_thread(
+            th_id,
+            "ferb-reviewer",
+            r#"{"done":false,"post":"looks good"}"#,
+        )
         .await
         .unwrap();
     assert_eq!(post.author, "ferb-reviewer");
@@ -168,7 +182,9 @@ async fn test_create_issue() {
     let id = test_uuid();
     Mock::given(method("POST"))
         .and(path("/api/v1/issues"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(id, "My task", "backlog")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(issue_json(id, "My task", "backlog")),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -188,7 +204,10 @@ async fn test_update_issue_status() {
     let id = test_uuid();
     Mock::given(method("PUT"))
         .and(path(format!("/api/v1/issues/{}/status", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": id, "status": "done"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"id": id, "status": "done"})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -205,7 +224,11 @@ async fn test_get_issue() {
     let id = test_uuid();
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/issues/{}", id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(id, "My task", "in_progress")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(
+            id,
+            "My task",
+            "in_progress",
+        )))
         .expect(1)
         .mount(&server)
         .await;
@@ -234,14 +257,23 @@ async fn test_channel_thread_post_flow() {
 
     Mock::given(method("POST"))
         .and(path(format!("/api/v1/channels/{}/threads", ch_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(thread_json(th_id, ch_id, "Define Goal: test task")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(thread_json(
+            th_id,
+            ch_id,
+            "Define Goal: test task",
+        )))
         .expect(1)
         .mount(&server)
         .await;
 
     Mock::given(method("POST"))
         .and(path(format!("/api/v1/threads/{}/posts", th_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(post_json(post_id, th_id, "ferb-user-proxy", "Build a todo app")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(post_json(
+            post_id,
+            th_id,
+            "ferb-user-proxy",
+            "Build a todo app",
+        )))
         .expect(1)
         .mount(&server)
         .await;
