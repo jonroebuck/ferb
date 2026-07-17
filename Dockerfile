@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+COPY workflows/ workflows/
+COPY prompts/ prompts/
 
 RUN cargo build --release -p ferb-cli
 
