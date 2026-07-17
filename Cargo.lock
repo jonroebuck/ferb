@@ -459,13 +459,9 @@ dependencies = [
  "config",
  "dirs",
  "ferb-agent-core",
- "ferb-approver",
  "ferb-core",
  "ferb-kanban-manager",
- "ferb-message-admin",
- "ferb-moderator",
  "ferb-reviewer",
- "ferb-user-proxy",
  "ferb-worker",
  "reqwest",
  "serde",
@@ -489,21 +485,6 @@ dependencies = [
 
 [[package]]
 name = "ferb-kanban-manager"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "ferb-agent-core",
- "ferb-core",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "ferb-message-admin"
 version = "0.1.0"
 dependencies = [
  "anyhow",

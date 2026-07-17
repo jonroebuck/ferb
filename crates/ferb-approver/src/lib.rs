@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use ferb_agent_core::{FerbAgent, SwitchboardClient};
-use ferb_core::{FerbState, TaskStatus};
 
 pub struct Approver {
     _sb: SwitchboardClient,
@@ -10,53 +9,6 @@ impl Approver {
     pub fn new(switchboard_url: &str) -> Self {
         Self {
             _sb: SwitchboardClient::new(switchboard_url),
-        }
-    }
-
-    pub fn run_legacy(&self, state: &mut FerbState, task_id: &str) {
-        let target_id = match state.kanban_board.get_task(task_id) {
-            Some(t) => match &t.approves {
-                Some(id) => id.clone(),
-                None => return,
-            },
-            None => return,
-        };
-
-        if state
-            .kanban_board
-            .get_task(task_id)
-            .map(|t| t.status == TaskStatus::Done)
-            .unwrap_or(false)
-        {
-            return;
-        }
-
-        let task = match state.kanban_board.get_task(task_id) {
-            Some(t) => t.clone(),
-            None => return,
-        };
-        if !state.kanban_board.inputs_done(&task) {
-            return;
-        }
-
-        let all_reviewers_done = state
-            .kanban_board
-            .tasks
-            .iter()
-            .filter(|t| t.reviews.as_deref() == Some(target_id.as_str()))
-            .all(|t| t.status == TaskStatus::Done);
-
-        if !all_reviewers_done {
-            return;
-        }
-
-        println!("[ferb-approver] Approving task: {}", target_id);
-
-        if let Some(target) = state.kanban_board.get_task_mut(&target_id) {
-            target.status = TaskStatus::Done;
-        }
-        if let Some(own) = state.kanban_board.get_task_mut(task_id) {
-            own.status = TaskStatus::Done;
         }
     }
 }

@@ -9,26 +9,51 @@ const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../../../workflows/default.
 const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../../../workflows/web-development.yaml");
 
 const BUNDLED_PROMPTS: &[(&str, &str)] = &[
-    ("analyst.md",               include_str!("../../../prompts/analyst.md")),
-    ("artifact-reviewer.md",     include_str!("../../../prompts/artifact-reviewer.md")),
-    ("create-artifact.md",       include_str!("../../../prompts/create-artifact.md")),
-    ("define-goal-reviewer.md",  include_str!("../../../prompts/define-goal-reviewer.md")),
-    ("develop-plan.md",          include_str!("../../../prompts/develop-plan.md")),
-    ("goal-reviewer.md",         include_str!("../../../prompts/goal-reviewer.md")),
-    ("maker-data.md",            include_str!("../../../prompts/maker-data.md")),
-    ("maker.md",                 include_str!("../../../prompts/maker.md")),
-    ("plan-reviewer.md",         include_str!("../../../prompts/plan-reviewer.md")),
-    ("planner.md",               include_str!("../../../prompts/planner.md")),
-    ("test-planner.md",          include_str!("../../../prompts/test-planner.md")),
-    ("test-reviewer.md",         include_str!("../../../prompts/test-reviewer.md")),
+    ("analyst.md", include_str!("../../../prompts/analyst.md")),
+    (
+        "artifact-reviewer.md",
+        include_str!("../../../prompts/artifact-reviewer.md"),
+    ),
+    (
+        "create-artifact.md",
+        include_str!("../../../prompts/create-artifact.md"),
+    ),
+    (
+        "define-goal-reviewer.md",
+        include_str!("../../../prompts/define-goal-reviewer.md"),
+    ),
+    (
+        "develop-plan.md",
+        include_str!("../../../prompts/develop-plan.md"),
+    ),
+    (
+        "goal-reviewer.md",
+        include_str!("../../../prompts/goal-reviewer.md"),
+    ),
+    (
+        "maker-data.md",
+        include_str!("../../../prompts/maker-data.md"),
+    ),
+    ("maker.md", include_str!("../../../prompts/maker.md")),
+    (
+        "plan-reviewer.md",
+        include_str!("../../../prompts/plan-reviewer.md"),
+    ),
+    ("planner.md", include_str!("../../../prompts/planner.md")),
+    (
+        "test-planner.md",
+        include_str!("../../../prompts/test-planner.md"),
+    ),
+    (
+        "test-reviewer.md",
+        include_str!("../../../prompts/test-reviewer.md"),
+    ),
 ];
 
 const SECRET_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
 
 fn is_interactive() -> bool {
-    let ci = std::env::var("CI")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let ci = std::env::var("CI").map(|v| v == "true").unwrap_or(false);
     io::stdin().is_terminal() && !ci
 }
 
@@ -185,15 +210,14 @@ fn ensure_workflows(ferb_dir: &Path) -> anyhow::Result<()> {
     let wf_dir = ferb_dir.join("workflows");
     std::fs::create_dir_all(&wf_dir)?;
     std::fs::write(wf_dir.join("default.yaml"), BUNDLED_DEFAULT_WORKFLOW)?;
-    std::fs::write(wf_dir.join("web-development.yaml"), BUNDLED_WEB_DEV_WORKFLOW)?;
+    std::fs::write(
+        wf_dir.join("web-development.yaml"),
+        BUNDLED_WEB_DEV_WORKFLOW,
+    )?;
     Ok(())
 }
 
-fn ensure_secret(
-    ferb_dir: &Path,
-    env_name: &str,
-    required: bool,
-) -> anyhow::Result<()> {
+fn ensure_secret(ferb_dir: &Path, env_name: &str, required: bool) -> anyhow::Result<()> {
     if read_secret(ferb_dir, env_name).is_some() {
         println!("{}: (already set)", env_name);
         return Ok(());
@@ -245,7 +269,9 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
                 model: "claude/claude-sonnet-4-6".to_string(),
                 max_tokens: 16384,
             },
-            workflow: crate::WorkflowToml { default: default_wf },
+            workflow: crate::WorkflowToml {
+                default: default_wf,
+            },
         };
         let toml_str = toml::to_string_pretty(&config)?;
         std::fs::write(&toml_path, toml_str)?;

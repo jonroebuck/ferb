@@ -34,8 +34,7 @@ async fn test_run_start_creates_issue_and_channel() {
     Mock::given(method("POST"))
         .and(path("/api/v1/channels"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(channel_json("ch-1", "ferb-123-my-task")),
+            ResponseTemplate::new(200).set_body_json(channel_json("ch-1", "ferb-123-my-task")),
         )
         .expect(1)
         .mount(&server)
@@ -43,10 +42,11 @@ async fn test_run_start_creates_issue_and_channel() {
 
     Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-1/status"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(issue_json("iss-1", "my task", "in_progress")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(
+            "iss-1",
+            "my task",
+            "in_progress",
+        )))
         .expect(1)
         .mount(&server)
         .await;
@@ -90,8 +90,7 @@ async fn test_agent_completion_posted_to_channel() {
     Mock::given(method("POST"))
         .and(path("/api/v1/threads/th-1/posts"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(post_json("post-1", "agent completed")),
+            ResponseTemplate::new(200).set_body_json(post_json("post-1", "agent completed")),
         )
         .expect(1)
         .mount(&server)
@@ -150,9 +149,11 @@ async fn test_channel_flag_reuses_existing_channel() {
 
     Mock::given(method("POST"))
         .and(path("/api/v1/issues"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(issue_json("iss-2", "resume task", "backlog")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(
+            "iss-2",
+            "resume task",
+            "backlog",
+        )))
         .expect(1)
         .mount(&server)
         .await;
@@ -162,10 +163,11 @@ async fn test_channel_flag_reuses_existing_channel() {
 
     Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-2/status"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(issue_json("iss-2", "resume task", "in_progress")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(
+            "iss-2",
+            "resume task",
+            "in_progress",
+        )))
         .expect(1)
         .mount(&server)
         .await;
@@ -195,7 +197,11 @@ async fn test_channel_flag_reuses_existing_channel() {
         .unwrap();
 
     let thread = client
-        .create_thread(existing_channel_id, "Ferb run started: resume task", "system")
+        .create_thread(
+            existing_channel_id,
+            "Ferb run started: resume task",
+            "system",
+        )
         .await
         .unwrap();
     assert_eq!(thread.id, "th-2");
@@ -241,7 +247,11 @@ async fn test_health_check_fails_when_unreachable() {
     let result = client.health_check().await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("Cannot connect to Switchboard"), "unexpected: {}", msg);
+    assert!(
+        msg.contains("Cannot connect to Switchboard"),
+        "unexpected: {}",
+        msg
+    );
 }
 
 #[tokio::test]
@@ -259,7 +269,11 @@ async fn test_health_check_fails_on_non_2xx() {
     let result = client.health_check().await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("Cannot connect to Switchboard"), "unexpected: {}", msg);
+    assert!(
+        msg.contains("Cannot connect to Switchboard"),
+        "unexpected: {}",
+        msg
+    );
 }
 
 #[tokio::test]
@@ -345,7 +359,9 @@ async fn test_create_artifact_with_schema_defaults() {
 
     Mock::given(method("POST"))
         .and(path("/api/v1/artifacts"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(artifact_json("art-1", "my-artifact")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(artifact_json("art-1", "my-artifact")),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -364,7 +380,9 @@ async fn test_create_artifact_without_schema_still_posts() {
     // create_artifact should proceed with just {name}.
     Mock::given(method("POST"))
         .and(path("/api/v1/artifacts"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(artifact_json("art-2", "bare-artifact")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(artifact_json("art-2", "bare-artifact")),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -399,9 +417,11 @@ async fn test_full_lifecycle_with_agent_completions() {
     // Start: create issue
     Mock::given(method("POST"))
         .and(path("/api/v1/issues"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(issue_json("iss-3", "full test", "backlog")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(
+            "iss-3",
+            "full test",
+            "backlog",
+        )))
         .mount(&server)
         .await;
 
@@ -409,8 +429,7 @@ async fn test_full_lifecycle_with_agent_completions() {
     Mock::given(method("POST"))
         .and(path("/api/v1/channels"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(channel_json("ch-3", "ferb-999-full-test")),
+            ResponseTemplate::new(200).set_body_json(channel_json("ch-3", "ferb-999-full-test")),
         )
         .mount(&server)
         .await;
@@ -418,9 +437,11 @@ async fn test_full_lifecycle_with_agent_completions() {
     // Start: transition to in_progress, then later to done
     Mock::given(method("PUT"))
         .and(path("/api/v1/issues/iss-3/status"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(issue_json("iss-3", "full test", "done")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json(
+            "iss-3",
+            "full test",
+            "done",
+        )))
         .mount(&server)
         .await;
 
@@ -437,9 +458,7 @@ async fn test_full_lifecycle_with_agent_completions() {
     // Agent completions + final summary: post to thread
     Mock::given(method("POST"))
         .and(path("/api/v1/threads/th-3/posts"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(post_json("post-x", "update")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(post_json("post-x", "update")))
         .mount(&server)
         .await;
 

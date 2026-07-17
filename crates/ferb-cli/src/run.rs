@@ -3,18 +3,13 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ferb_agent_core::{CardContext, CardWorkflow, FerbAgent, RunState, SwitchboardClient, Uuid};
-use ferb_approver::Approver;
-use ferb_core::{FerbState, KanbanBoard, KanbanTask, TaskStatus};
-use ferb_moderator::Moderator;
+use ferb_core::FerbState;
 use ferb_reviewer::Reviewer;
-use ferb_user_proxy::UserProxy;
 use ferb_worker::Worker;
-use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::FerbConfig;
 
-const MAX_PASSES: usize = 10;
 const MAX_DEFINE_GOAL_ITERATIONS: usize = 10;
 
 fn expand_tilde(path: &str) -> PathBuf {
@@ -32,72 +27,7 @@ fn expand_tilde(path: &str) -> PathBuf {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct WorkflowTaskDef {
-    id: String,
-    name: String,
-    agent: String,
-    #[serde(default)]
-    prompt: Option<String>,
-    #[serde(default)]
-    inputs: Vec<String>,
-    #[serde(default)]
-    reviews: Option<String>,
-    #[serde(default)]
-    approves: Option<String>,
-    #[serde(default)]
-    max_iterations: usize,
-    #[serde(default)]
-    success_criteria: Vec<String>,
-    #[serde(default = "default_pass_budget")]
-    pass_budget: usize,
-}
-
-fn default_pass_budget() -> usize {
-    3
-}
-
-#[derive(Debug, Deserialize)]
-struct TaskWorkflowDef {
-    #[allow(dead_code)]
-    workflow: String,
-    tasks: Vec<WorkflowTaskDef>,
-}
-
-fn load_kanban_from_str(content: &str) -> anyhow::Result<KanbanBoard> {
-    let def: TaskWorkflowDef = serde_yaml::from_str(content)?;
-
-    let tasks = def
-        .tasks
-        .into_iter()
-        .map(|t| KanbanTask {
-            id: t.id,
-            name: t.name,
-            agent: t.agent,
-            prompt: t.prompt,
-            status: TaskStatus::Pending,
-            inputs: t.inputs,
-            reviews: t.reviews,
-            approves: t.approves,
-            max_iterations: t.max_iterations,
-            iterations_used: 0,
-            questions: vec![],
-            comments: vec![],
-            success_criteria: t.success_criteria,
-            pass_budget: t.pass_budget,
-        })
-        .collect();
-
-    Ok(KanbanBoard { tasks })
-}
-
 // ── Card-based workflow pipeline ───────────────────────────────────────────
-
-fn is_card_workflow(content: &str) -> bool {
-    serde_yaml::from_str::<serde_json::Value>(content)
-        .map(|v| v.get("cards").is_some())
-        .unwrap_or(false)
-}
 
 fn card_prompts_dir() -> std::path::PathBuf {
     std::env::var("FERB_PROMPTS_DIR")
@@ -141,25 +71,7 @@ async fn run_define_goal_card(
     reviewer: &Reviewer,
     outputs: &[String],
 ) -> anyhow::Result<()> {
-    let board = KanbanBoard {
-        tasks: vec![KanbanTask {
-            id: "define-goal".to_string(),
-            name: "Define Goal".to_string(),
-            agent: "ferb-user-proxy".to_string(),
-            prompt: None,
-            status: TaskStatus::Pending,
-            inputs: vec![],
-            reviews: None,
-            approves: None,
-            max_iterations: 10,
-            iterations_used: 0,
-            questions: vec![],
-            comments: vec![],
-            success_criteria: vec![],
-            pass_budget: 3,
-        }],
-    };
-    let mut state = FerbState::new(board);
+    let mut state = FerbState::new();
     state
         .channel_ids
         .insert("general".to_string(), run_state.channel_id.to_string());
@@ -172,7 +84,10 @@ async fn run_define_goal_card(
         for output_name in outputs {
             if let Some(&tid) = run_state.output_threads.get(output_name) {
                 if let Err(e) = sb.post_to_thread(tid, "ferb-reviewer", &artifact).await {
-                    eprintln!("[warn] Failed to post goal to '{}' thread: {}", output_name, e);
+                    eprintln!(
+                        "[warn] Failed to post goal to '{}' thread: {}",
+                        output_name, e
+                    );
                 }
             }
         }
@@ -200,7 +115,9 @@ async fn run_card_pipeline(
                 .map_err(|e| {
                     anyhow::anyhow!("Failed to create output thread '{}': {}", output_name, e)
                 })?;
-            run_state.output_threads.insert(output_name.clone(), thread.id);
+            run_state
+                .output_threads
+                .insert(output_name.clone(), thread.id);
         }
 
         // define-goal runs an interactive conversation; handled separately.
@@ -210,8 +127,7 @@ async fn run_card_pipeline(
         }
 
         // Build context string from all input threads.
-        let input_context =
-            build_input_context(sb, &card.inputs, &run_state.output_threads).await;
+        let input_context = build_input_context(sb, &card.inputs, &run_state.output_threads).await;
 
         // Load a card-specific system prompt (e.g. prompts/develop-plan.md).
         let prompt = load_card_prompt(&card.title);
@@ -238,12 +154,19 @@ async fn run_card_pipeline(
             prompt,
         };
 
-        let primary_agent = card.agents.first().map(String::as_str).unwrap_or("ferb-worker");
+        let primary_agent = card
+            .agents
+            .first()
+            .map(String::as_str)
+            .unwrap_or("ferb-worker");
         let resp = match primary_agent {
             "ferb-worker" => worker.run(context, tramway).await?,
             "ferb-reviewer" => reviewer.run(context, tramway).await?,
             unknown => {
-                eprintln!("[warn] Unknown agent '{}' for card '{}', skipping", unknown, card.title);
+                eprintln!(
+                    "[warn] Unknown agent '{}' for card '{}', skipping",
+                    unknown, card.title
+                );
                 continue;
             }
         };
@@ -259,14 +182,20 @@ async fn run_card_pipeline(
         for output_name in &card.outputs {
             if let Some(&tid) = run_state.output_threads.get(output_name) {
                 if let Err(e) = sb.post_to_thread(tid, primary_agent, &resp.post).await {
-                    eprintln!("[warn] Failed to post to output thread '{}': {}", output_name, e);
+                    eprintln!(
+                        "[warn] Failed to post to output thread '{}': {}",
+                        output_name, e
+                    );
                 }
             }
         }
 
         // Progress summary to the main thread.
         let summary = format!("Card '{}' completed.", card.title);
-        if let Err(e) = sb.post_to_thread(run_state.thread_id, "system", &summary).await {
+        if let Err(e) = sb
+            .post_to_thread(run_state.thread_id, "system", &summary)
+            .await
+        {
             eprintln!("[warn] Failed to post progress: {}", e);
         }
     }
@@ -289,17 +218,22 @@ async fn run_card_workflow_task(
     let sb = SwitchboardClient::new(sb_url);
     let reviewer = Reviewer::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
     let worker = Worker::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
-    let tramway = ferb_core::TramwayClient::new(tw_url, model).with_max_tokens(config.tramway.max_tokens);
+    let tramway =
+        ferb_core::TramwayClient::new(tw_url, model).with_max_tokens(config.tramway.max_tokens);
 
     sb.health_check().await.map_err(|e| {
-        anyhow::anyhow!("Error: {}\nRun 'ferb up' to start all required services.", e)
+        anyhow::anyhow!(
+            "Error: {}\nRun 'ferb up' to start all required services.",
+            e
+        )
     })?;
 
     println!("\n=== Ferb ===\n");
 
-    let issue = sb.create_issue(goal).await.map_err(|e| {
-        anyhow::anyhow!("Switchboard setup failed — create_issue: {}", e)
-    })?;
+    let issue = sb
+        .create_issue(goal)
+        .await
+        .map_err(|e| anyhow::anyhow!("Switchboard setup failed — create_issue: {}", e))?;
 
     let ch_id_str = if let Some(id) = channel_id {
         id.to_string()
@@ -337,24 +271,41 @@ async fn run_card_workflow_task(
         confirmed_goal: None,
     };
 
-    let result =
-        run_card_pipeline(&workflow, goal, &mut run_state, &sb, &tramway, &worker, &reviewer)
-            .await;
+    let result = run_card_pipeline(
+        &workflow,
+        goal,
+        &mut run_state,
+        &sb,
+        &tramway,
+        &worker,
+        &reviewer,
+    )
+    .await;
 
     match &result {
         Ok(()) => {
             let _ = sb
-                .post_to_thread(run_state.thread_id, "system", "Workflow completed successfully.")
+                .post_to_thread(
+                    run_state.thread_id,
+                    "system",
+                    "Workflow completed successfully.",
+                )
                 .await;
             if let Err(e) = sb.update_issue_status(run_state.issue_id, "done").await {
-                eprintln!("[warn] Switchboard: failed to transition issue to done: {}", e);
+                eprintln!(
+                    "[warn] Switchboard: failed to transition issue to done: {}",
+                    e
+                );
             }
         }
         Err(e) => {
             let msg = format!("Workflow failed: {}", e);
             let _ = sb.post_to_thread(run_state.thread_id, "system", &msg).await;
             if let Err(e2) = sb.update_issue_status(run_state.issue_id, "blocked").await {
-                eprintln!("[warn] Switchboard: failed to transition issue to blocked: {}", e2);
+                eprintln!(
+                    "[warn] Switchboard: failed to transition issue to blocked: {}",
+                    e2
+                );
             }
         }
     }
@@ -364,6 +315,7 @@ async fn run_card_workflow_task(
 
 // ── Artifact filesystem write ──────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn detect_extension(content: &str) -> &'static str {
     let t = content.trim_start();
     // Fast path: content starts directly with the artifact.
@@ -377,7 +329,8 @@ fn detect_extension(content: &str) -> &'static str {
     // Search the first 2000 chars for a definitive HTML marker before falling
     // back to the YAML heuristic (which matches any "key:\n" in prose too).
     let window = &t[..t.len().min(2000)];
-    if window.contains("<!DOCTYPE ") || window.contains("<!doctype ") || window.contains("\n<html") {
+    if window.contains("<!DOCTYPE ") || window.contains("<!doctype ") || window.contains("\n<html")
+    {
         return "html";
     }
     if t.contains(":\n") || t.starts_with("---") {
@@ -387,11 +340,18 @@ fn detect_extension(content: &str) -> &'static str {
 }
 
 // Returns true if `line` looks like a YAML mapping key (e.g. "stores:" or "Any Store:").
+#[allow(dead_code)]
 fn is_yaml_key_line(line: &str) -> bool {
-    let Some((key, _)) = line.split_once(':') else { return false; };
+    let Some((key, _)) = line.split_once(':') else {
+        return false;
+    };
     let key = key.trim();
-    !key.is_empty() && !key.contains('\n') && key.len() <= 64
-        && key.chars().all(|c| c.is_alphanumeric() || " _-".contains(c))
+    !key.is_empty()
+        && !key.contains('\n')
+        && key.len() <= 64
+        && key
+            .chars()
+            .all(|c| c.is_alphanumeric() || " _-".contains(c))
 }
 
 /// Strip any leading reasoning prose the LLM may have prepended before the
@@ -431,6 +391,7 @@ fn strip_preamble<'a>(content: &'a str, ext: &str) -> &'a str {
     }
 }
 
+#[allow(dead_code)]
 fn iter_lines_with_pos(s: &str) -> impl Iterator<Item = (usize, &str)> {
     let mut pos = 0;
     s.split('\n').map(move |line| {
@@ -440,6 +401,7 @@ fn iter_lines_with_pos(s: &str) -> impl Iterator<Item = (usize, &str)> {
     })
 }
 
+#[allow(dead_code)]
 fn write_artifact_to_disk(
     state: &FerbState,
     artifact_id: &str,
@@ -457,16 +419,24 @@ fn write_artifact_to_disk(
     let ext = detect_extension(&raw);
     let content = strip_preamble(&raw, ext);
     if content.trim().is_empty() {
-        eprintln!("[warn] Artifact '{}' is empty after stripping preamble; skipping write", artifact_id);
+        eprintln!(
+            "[warn] Artifact '{}' is empty after stripping preamble; skipping write",
+            artifact_id
+        );
         return;
     }
     let path = output_dir.join(format!("{}.{}", filename_stem, ext));
     match std::fs::write(&path, content) {
         Ok(()) => println!("[info] Artifact written to {}", path.display()),
-        Err(e) => eprintln!("[warn] Failed to write artifact to {}: {}", path.display(), e),
+        Err(e) => eprintln!(
+            "[warn] Failed to write artifact to {}: {}",
+            path.display(),
+            e
+        ),
     }
 }
 
+#[allow(dead_code)]
 fn write_artifacts_to_disk(state: &FerbState) {
     let output_dir = std::path::Path::new("ferb-output");
     if let Err(e) = std::fs::create_dir_all(output_dir) {
@@ -477,8 +447,6 @@ fn write_artifacts_to_disk(state: &FerbState) {
     write_artifact_to_disk(state, "make-data-file", "data-file", output_dir);
 }
 
-// ── Task-based pipeline (legacy default.yaml) ─────────────────────────────
-
 fn slugify(s: &str) -> String {
     s.to_lowercase()
         .chars()
@@ -488,132 +456,6 @@ fn slugify(s: &str) -> String {
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join("-")
-}
-
-fn print_kanban(state: &FerbState) {
-    println!("\n  Kanban:");
-    for task in &state.kanban_board.tasks {
-        let q_count = task.questions.len();
-        let unanswered = task
-            .questions
-            .iter()
-            .filter(|q| q.status == ferb_core::QuestionStatus::Unanswered)
-            .count();
-        println!(
-            "    [{:>16?}] {} (iter {}/{}) Q:{}/{}",
-            task.status, task.name, task.iterations_used, task.max_iterations, unanswered, q_count,
-        );
-    }
-    println!();
-}
-
-async fn switchboard_start(
-    sb: &SwitchboardClient,
-    title: &str,
-    channel_id: Option<&str>,
-) -> anyhow::Result<ferb_core::SwitchboardRunState> {
-    let issue = sb.create_issue(title).await.map_err(|e| {
-        anyhow::anyhow!("Switchboard setup failed — create_issue: {}", e)
-    })?;
-
-    let ch_id_str = if let Some(id) = channel_id {
-        id.to_string()
-    } else {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let slug = slugify(title);
-        let name = format!("ferb-{}-{}", ts, slug);
-        sb.create_channel(&name).await.map(|ch| ch.id.to_string()).map_err(|e| {
-            anyhow::anyhow!("Switchboard setup failed — create_channel: {}", e)
-        })?
-    };
-
-    if let Err(e) = sb.update_issue_status(issue.id, "in_progress").await {
-        eprintln!("[warn] Switchboard: failed to transition issue: {}", e);
-    }
-
-    let ch_uuid: Uuid = ch_id_str
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Switchboard setup failed — invalid channel_id: {}", ch_id_str))?;
-
-    let thread_id = sb
-        .create_thread(ch_uuid, &format!("Ferb run started: {}", title))
-        .await
-        .map(|t| t.id.to_string())
-        .map_err(|e| anyhow::anyhow!("Switchboard setup failed — create_thread: {}", e))?;
-
-    Ok(ferb_core::SwitchboardRunState {
-        issue_id: issue.id.to_string(),
-        channel_id: ch_id_str,
-        thread_id,
-    })
-}
-
-async fn switchboard_post_agent_completion(
-    sb: &SwitchboardClient,
-    run: &ferb_core::SwitchboardRunState,
-    agent: &str,
-    task_id: &str,
-    task_name: &str,
-    status: &TaskStatus,
-) {
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let content = format!(
-        "[{}] Agent: {} | Task: {} ({}) | Status: {:?}",
-        ts, agent, task_name, task_id, status
-    );
-    if let Ok(tid) = run.thread_id.parse::<Uuid>() {
-        if let Err(e) = sb.post_to_thread(tid, "system", &content).await {
-            eprintln!("[warn] Switchboard: failed to post agent completion: {}", e);
-        }
-    }
-}
-
-async fn switchboard_finish_success(
-    sb: &SwitchboardClient,
-    run: &ferb_core::SwitchboardRunState,
-    state: &FerbState,
-) {
-    let mut summary = String::from("Ferb run completed successfully.\n\nCompleted tasks:");
-    for task in &state.kanban_board.tasks {
-        summary.push_str(&format!("\n- {} [{:?}]", task.name, task.status));
-    }
-
-    if let Ok(tid) = run.thread_id.parse::<Uuid>() {
-        if let Err(e) = sb.post_to_thread(tid, "system", &summary).await {
-            eprintln!("[warn] Switchboard: failed to post completion summary: {}", e);
-        }
-    }
-
-    if let Ok(iid) = run.issue_id.parse::<Uuid>() {
-        if let Err(e) = sb.update_issue_status(iid, "done").await {
-            eprintln!("[warn] Switchboard: failed to transition issue to done: {}", e);
-        }
-    }
-}
-
-async fn switchboard_finish_failure(
-    sb: &SwitchboardClient,
-    run: &ferb_core::SwitchboardRunState,
-    error: &str,
-) {
-    let content = format!("Ferb run failed: {}", error);
-    if let Ok(tid) = run.thread_id.parse::<Uuid>() {
-        if let Err(e) = sb.post_to_thread(tid, "system", &content).await {
-            eprintln!("[warn] Switchboard: failed to post error details: {}", e);
-        }
-    }
-
-    if let Ok(iid) = run.issue_id.parse::<Uuid>() {
-        if let Err(e) = sb.update_issue_status(iid, "blocked").await {
-            eprintln!("[warn] Switchboard: failed to transition issue to blocked: {}", e);
-        }
-    }
 }
 
 // ── Define-Goal Phase ──────────────────────────────────────────────────────
@@ -646,16 +488,26 @@ async fn post_initial_goal_with_retry(
         channel_id, thread_id
     );
     if let Ok(tid) = thread_id.parse::<Uuid>() {
-        if sb.post_to_thread(tid, "ferb-user-proxy", goal).await.is_ok() {
-            println!("[trace] post_initial_goal_with_retry: initial post succeeded thread_id={}", thread_id);
+        if sb
+            .post_to_thread(tid, "ferb-user-proxy", goal)
+            .await
+            .is_ok()
+        {
+            println!(
+                "[trace] post_initial_goal_with_retry: initial post succeeded thread_id={}",
+                thread_id
+            );
             return Ok(thread_id);
         }
     }
 
     eprintln!("[warn] Initial post to define-goal thread failed, retrying with a fresh thread...");
-    let ch_uuid: Uuid = channel_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Could not create define-goal thread on retry: invalid channel_id={}", channel_id))?;
+    let ch_uuid: Uuid = channel_id.parse().map_err(|_| {
+        anyhow::anyhow!(
+            "Could not create define-goal thread on retry: invalid channel_id={}",
+            channel_id
+        )
+    })?;
     let new_thread = sb
         .create_thread(ch_uuid, &format!("Define Goal: {}", goal))
         .await
@@ -684,7 +536,10 @@ async fn post_initial_goal_with_retry(
             )
         })?;
 
-    println!("[trace] post_initial_goal_with_retry: retry post succeeded thread_id={}", new_thread_id);
+    println!(
+        "[trace] post_initial_goal_with_retry: retry post succeeded thread_id={}",
+        new_thread_id
+    );
     Ok(new_thread_id)
 }
 
@@ -720,8 +575,7 @@ async fn run_define_goal_phase(
         "[trace] run_define_goal_phase: calling post_initial_goal_with_retry with channel_id={} thread_id={}",
         channel_id, thread_id
     );
-    let thread_id =
-        post_initial_goal_with_retry(sb, goal, state, &channel_id, thread_id).await?;
+    let thread_id = post_initial_goal_with_retry(sb, goal, state, &channel_id, thread_id).await?;
     println!(
         "[trace] run_define_goal_phase: active thread_id after initial post={}",
         thread_id
@@ -729,10 +583,7 @@ async fn run_define_goal_phase(
 
     for _iteration in 0..MAX_DEFINE_GOAL_ITERATIONS {
         // Reviewer reads the thread and posts a question or refined-goal summary.
-        match reviewer
-            .analyze_define_goal_thread(sb, &thread_id)
-            .await
-        {
+        match reviewer.analyze_define_goal_thread(sb, &thread_id).await {
             Ok((done, post)) => {
                 let post_type = if done { "summary" } else { "question" };
                 let envelope = serde_json::json!({
@@ -783,7 +634,10 @@ async fn setup_define_goal_channel(
         }
     };
     let channel_id_str = channel.id.to_string();
-    println!("[trace] setup_define_goal_channel: channel_id={}", channel_id_str);
+    println!(
+        "[trace] setup_define_goal_channel: channel_id={}",
+        channel_id_str
+    );
 
     let thread = match sb
         .create_thread(channel.id, &format!("Define Goal: {}", goal))
@@ -796,7 +650,10 @@ async fn setup_define_goal_channel(
         }
     };
     let thread_id_str = thread.id.to_string();
-    println!("[trace] setup_define_goal_channel: thread_id={}", thread_id_str);
+    println!(
+        "[trace] setup_define_goal_channel: thread_id={}",
+        thread_id_str
+    );
 
     state
         .channel_ids
@@ -815,9 +672,6 @@ async fn setup_define_goal_channel(
 fn store_raw_goal(state: &mut FerbState, goal: &str) -> anyhow::Result<()> {
     state.set_artifact("define-goal", None, goal)?;
     state.set_artifact("confirmed-goal", None, goal)?;
-    if let Some(t) = state.kanban_board.get_task_mut("define-goal") {
-        t.status = TaskStatus::Done;
-    }
     Ok(())
 }
 
@@ -852,19 +706,11 @@ async fn handle_summary_confirmation(
 
         state.set_artifact("define-goal", None, refined_content)?;
 
-        state.set_artifact(
-            "confirmed-goal",
-            None,
-            refined_content,
-        )?;
+        state.set_artifact("confirmed-goal", None, refined_content)?;
         println!(
             "[trace] stored confirmed-goal artifact: {} chars",
             refined_content.len()
         );
-
-        if let Some(t) = state.kanban_board.get_task_mut("define-goal") {
-            t.status = TaskStatus::Done;
-        }
 
         // Post a status update to the progress thread if it exists.
         if let Some(run_thread) = state.thread_ids.get("progress") {
@@ -910,10 +756,7 @@ async fn handle_summary_confirmation(
 }
 
 /// Ask for the user's answer to a reviewer question and post it to the thread.
-async fn collect_and_post_answer(
-    sb: &SwitchboardClient,
-    thread_id: &str,
-) -> anyhow::Result<()> {
+async fn collect_and_post_answer(sb: &SwitchboardClient, thread_id: &str) -> anyhow::Result<()> {
     print!("Your answer: ");
     io::stdout().flush()?;
     let mut answer = String::new();
@@ -932,217 +775,12 @@ async fn collect_and_post_answer(
     Ok(())
 }
 
-// ── Pipeline ──────────────────────────────────────────────────────────────
-
-struct Agents<'a> {
-    moderator: &'a Moderator,
-    user_proxy: &'a UserProxy,
-    reviewer: &'a Reviewer,
-    worker: &'a Worker,
-    approver: &'a Approver,
-    sb: &'a SwitchboardClient,
-    sb_run: &'a ferb_core::SwitchboardRunState,
-}
-
-fn print_completion_summary(state: &FerbState) {
-    let done: Vec<_> = state
-        .kanban_board
-        .tasks
-        .iter()
-        .filter(|t| t.status == TaskStatus::Done)
-        .collect();
-    let blocked: Vec<_> = state
-        .kanban_board
-        .tasks
-        .iter()
-        .filter(|t| t.status == TaskStatus::Blocked)
-        .collect();
-    let remaining: Vec<_> = state
-        .kanban_board
-        .tasks
-        .iter()
-        .filter(|t| t.status != TaskStatus::Done && t.status != TaskStatus::Blocked)
-        .collect();
-
-    if !done.is_empty() {
-        println!("## Completed ({}):", done.len());
-        for t in &done {
-            println!("  ✓ {}", t.name);
-        }
-    }
-    if !blocked.is_empty() {
-        println!("\n## Blocked ({}):", blocked.len());
-        for t in &blocked {
-            println!("  ✗ {} (exceeded pass budget of {})", t.name, t.pass_budget);
-        }
-    }
-    if !remaining.is_empty() {
-        println!("\n## Remaining ({}):", remaining.len());
-        for t in &remaining {
-            println!("  ○ {} [{:?}]", t.name, t.status);
-        }
-    }
-}
-
-async fn run_pipeline(state: &mut FerbState, agents: &Agents<'_>) -> anyhow::Result<()> {
-    let mut printed_headers: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut card_pass_counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    let mut prev_board_snapshot = String::new();
-
-    for pass in 0..MAX_PASSES {
-        state.pass = pass;
-        println!("--- Pass {} ---", pass + 1);
-
-        agents.moderator.reconcile(state);
-
-        let got_input = agents.user_proxy.run_legacy(state)?;
-
-        if got_input {
-            agents.moderator.reconcile(state);
-        }
-
-        if state.kanban_board.all_done() {
-            println!("\n=== All tasks complete ===\n");
-            print_kanban(state);
-            println!("## Final Artifacts\n");
-            for (id, path) in &state.artifacts {
-                println!("  {}: {}", id, path);
-            }
-            return Ok(());
-        }
-
-        if state.kanban_board.all_complete() {
-            println!("\n=== Workflow stopped: some cards blocked ===\n");
-            print_kanban(state);
-            print_completion_summary(state);
-            return Ok(());
-        }
-
-        let task_ids: Vec<String> = state
-            .kanban_board
-            .tasks
-            .iter()
-            .map(|t| t.id.clone())
-            .collect();
-
-        for task_id in &task_ids {
-            let (agent, task_name, task_status, pass_budget) =
-                match state.kanban_board.get_task(task_id) {
-                    Some(t) => (
-                        t.agent.clone(),
-                        t.name.clone(),
-                        t.status.clone(),
-                        t.pass_budget,
-                    ),
-                    None => continue,
-                };
-
-            // Skip tasks that are already done or blocked.
-            if task_status == TaskStatus::Done || task_status == TaskStatus::Blocked {
-                continue;
-            }
-
-            // Enforce per-card pass budget (0 = unlimited).
-            *card_pass_counts.entry(task_id.clone()).or_insert(0) += 1;
-            let passes_used = card_pass_counts[task_id.as_str()];
-            if pass_budget > 0 && passes_used > pass_budget {
-                eprintln!(
-                    "[warn] Card '{}' exceeded pass budget ({} passes), marking Blocked",
-                    task_name, pass_budget
-                );
-                if let Some(t) = state.kanban_board.get_task_mut(task_id) {
-                    t.status = TaskStatus::Blocked;
-                }
-                continue;
-            }
-
-            // Print a section header the first time each task becomes active.
-            if !printed_headers.contains(task_id) {
-                println!("\n=== {} ===\n", task_name);
-                printed_headers.insert(task_id.clone());
-            }
-
-            let status_before = state.kanban_board.get_task(task_id).map(|t| t.status.clone());
-
-            match agent.as_str() {
-                "ferb-reviewer" => {
-                    agents.reviewer.run_legacy(state, task_id).await?;
-                }
-                "ferb-worker" => {
-                    agents.worker.run_legacy(state, task_id).await?;
-                }
-                "ferb-approver" => {
-                    agents.approver.run_legacy(state, task_id);
-                }
-                _ => {
-                    eprintln!("[warn] Unknown agent: {}", agent);
-                }
-            }
-
-            let status_after = state.kanban_board.get_task(task_id).map(|t| t.status.clone());
-
-            if status_after != status_before {
-                let final_status = status_after.unwrap_or(TaskStatus::Pending);
-                switchboard_post_agent_completion(
-                    agents.sb, agents.sb_run, &agent, task_id, &task_name, &final_status,
-                )
-                .await;
-            }
-        }
-
-        print_kanban(state);
-
-        // Cycle detection: if the board is identical to last pass, nothing can progress.
-        let current_snapshot =
-            serde_json::to_string(&state.kanban_board).unwrap_or_default();
-        if !prev_board_snapshot.is_empty() && current_snapshot == prev_board_snapshot {
-            eprintln!(
-                "\nERROR: Infinite loop detected — board state unchanged after pass {}.",
-                pass + 1
-            );
-            eprintln!("No agent made any progress. Check your workflow for missing inputs or unreachable approval conditions.\n");
-            print_kanban(state);
-            print_completion_summary(state);
-            anyhow::bail!(
-                "Cycle detected: board state was identical after passes {} and {}",
-                pass,
-                pass + 1
-            );
-        }
-        prev_board_snapshot = current_snapshot;
-
-        if pass == MAX_PASSES - 1 {
-            println!(
-                "\nMax passes ({}) reached without completing all tasks.\n",
-                MAX_PASSES
-            );
-            print_kanban(state);
-            print_completion_summary(state);
-            return Ok(());
-        }
-    }
-
-    Ok(())
-}
-
 pub async fn run_task(
     goal: &str,
     channel_id: Option<&str>,
     workflow_path: Option<&str>,
     config: &FerbConfig,
 ) -> anyhow::Result<()> {
-    let sb_url = &config.switchboard.url;
-    let tw_url = &config.tramway.url;
-    let model = &config.tramway.model;
-
-    let sb = SwitchboardClient::new(sb_url);
-    let moderator = Moderator::new(sb_url);
-    let user_proxy = UserProxy::new(sb_url);
-    let reviewer = Reviewer::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
-    let worker = Worker::new(sb_url, tw_url, model).with_max_tokens(config.tramway.max_tokens);
-    let approver = Approver::new(sb_url);
-
     let wf_raw = workflow_path
         .map(String::from)
         .or_else(|| std::env::var("FERB_WORKFLOW").ok())
@@ -1151,77 +789,7 @@ pub async fn run_task(
     let wf_content = std::fs::read_to_string(&wf_path)
         .map_err(|e| anyhow::anyhow!("Failed to load workflow {}: {}", wf_path.display(), e))?;
 
-    // Card-based workflow (web-development.yaml style with `cards:` key).
-    if is_card_workflow(&wf_content) {
-        return run_card_workflow_task(goal, channel_id, &wf_content, config).await;
-    }
-
-    // Legacy task-based pipeline.
-    let kanban_board = load_kanban_from_str(&wf_content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse workflow {}: {}", wf_path.display(), e))?;
-
-    let mut state = FerbState::new(kanban_board);
-
-    if let Ok(wf_val) = serde_yaml::from_str::<serde_json::Value>(&wf_content) {
-        state.active_workflow = Some(wf_val);
-    }
-
-    // ── Switchboard health check ──────────────────────────────────────────
-    sb.health_check().await.map_err(|e| {
-        anyhow::anyhow!(
-            "Error: {}\nRun 'ferb up' to start all required services.",
-            e
-        )
-    })?;
-
-    println!("\n=== Ferb ===\n");
-
-    // ── Define Goal phase (conversation-based) ────────────────────────────
-    if state.kanban_board.get_task("define-goal").is_some() {
-        println!("=== Define Goal ===\n");
-        run_define_goal_phase(&mut state, &sb, &reviewer, goal).await?;
-        let keys: Vec<&str> = state.artifacts.keys().map(String::as_str).collect();
-        println!("[trace] FerbState artifacts after define-goal: {:?}", keys);
-    } else {
-        // Legacy seed: no define-goal task, seed the goal via message channel.
-        state.send_message("user", "ferb-reviewer", "define-goal", goal);
-    }
-
-    // ── Switchboard run tracking (progress channel) ───────────────────────
-    // Reuse the channel created during define-goal phase if available.
-    let define_goal_channel = state.channel_ids.get("general").cloned();
-    let effective_channel = channel_id
-        .map(String::from)
-        .or(define_goal_channel);
-
-    let sb_run = switchboard_start(&sb, goal, effective_channel.as_deref()).await?;
-
-    // Store the progress thread in state so handle_summary_confirmation can reach it.
-    state.channel_ids.insert("progress".to_string(), sb_run.channel_id.clone());
-    state.thread_ids.insert("progress".to_string(), sb_run.thread_id.clone());
-
-    let agents = Agents {
-        moderator: &moderator,
-        user_proxy: &user_proxy,
-        reviewer: &reviewer,
-        worker: &worker,
-        approver: &approver,
-        sb: &sb,
-        sb_run: &sb_run,
-    };
-
-    let result = run_pipeline(&mut state, &agents).await;
-
-    if result.is_ok() {
-        write_artifacts_to_disk(&state);
-    }
-
-    match &result {
-        Ok(()) => switchboard_finish_success(&sb, &sb_run, &state).await,
-        Err(e) => switchboard_finish_failure(&sb, &sb_run, &format!("{}", e)).await,
-    }
-
-    result
+    run_card_workflow_task(goal, channel_id, &wf_content, config).await
 }
 
 #[cfg(test)]
@@ -1260,35 +828,17 @@ mod tests {
     }
 
     #[test]
-    fn store_raw_goal_marks_define_goal_done() {
-        use ferb_core::{KanbanBoard, KanbanTask, TaskStatus};
-
-        let board = KanbanBoard {
-            tasks: vec![KanbanTask {
-                id: "define-goal".to_string(),
-                name: "Define Goal".to_string(),
-                agent: "ferb-user-proxy".to_string(),
-                prompt: None,
-                status: TaskStatus::Pending,
-                inputs: vec![],
-                reviews: None,
-                approves: None,
-                max_iterations: 5,
-                iterations_used: 0,
-                questions: vec![],
-                comments: vec![],
-                success_criteria: vec![],
-                pass_budget: 3,
-            }],
-        };
-        let mut state = FerbState::new(board);
+    fn store_raw_goal_writes_define_and_confirmed_artifacts() {
+        let mut state = FerbState::new();
         store_raw_goal(&mut state, "Build a calculator").unwrap();
 
         assert_eq!(
-            state.kanban_board.get_task("define-goal").unwrap().status,
-            TaskStatus::Done
+            state.get_artifact("define-goal").unwrap(),
+            "Build a calculator"
         );
-        let artifact = state.get_artifact("define-goal").unwrap();
-        assert_eq!(artifact, "Build a calculator");
+        assert_eq!(
+            state.get_artifact("confirmed-goal").unwrap(),
+            "Build a calculator"
+        );
     }
 }

@@ -125,7 +125,10 @@ impl TramwayClient {
             let truncated = matches!(finish_reason, "length" | "max_tokens");
 
             if truncated {
-                eprintln!("[warn] stop_reason={} (max_tokens={}); output may be truncated", finish_reason, self.max_tokens);
+                eprintln!(
+                    "[warn] stop_reason={} (max_tokens={}); output may be truncated",
+                    finish_reason, self.max_tokens
+                );
             } else {
                 eprintln!("[trace] stop_reason={}", finish_reason);
             }
@@ -145,7 +148,8 @@ impl TramwayClient {
 
             eprintln!(
                 "[warn] Requesting continuation (attempt {}/{})...",
-                attempt + 1, MAX_CONTINUATIONS
+                attempt + 1,
+                MAX_CONTINUATIONS
             );
             all_messages.push(ChatMessage {
                 role: "assistant".to_string(),
@@ -153,7 +157,9 @@ impl TramwayClient {
             });
             all_messages.push(ChatMessage {
                 role: "user".to_string(),
-                content: "Continue from exactly where you stopped. Output nothing but the continuation.".to_string(),
+                content:
+                    "Continue from exactly where you stopped. Output nothing but the continuation."
+                        .to_string(),
             });
         }
 

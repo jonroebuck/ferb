@@ -91,12 +91,10 @@ impl SwitchboardClient {
     /// Warns (but succeeds) when the response body is not the expected schema format.
     pub async fn health_check(&self) -> anyhow::Result<()> {
         let url = format!("{}/api/v1/schema/channels", self.base_url);
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|_| anyhow::anyhow!("Cannot connect to Switchboard at {}", self.base_url))?;
+        let resp =
+            self.http.get(&url).send().await.map_err(|_| {
+                anyhow::anyhow!("Cannot connect to Switchboard at {}", self.base_url)
+            })?;
         if !resp.status().is_success() {
             anyhow::bail!("Cannot connect to Switchboard at {}", self.base_url);
         }
@@ -119,10 +117,7 @@ impl SwitchboardClient {
 
     /// Build a JSON object with all required fields populated, using an empty
     /// string as the default for any field not supplied by the caller.
-    fn apply_schema_defaults(
-        base: serde_json::Value,
-        schema: &CreateSchema,
-    ) -> serde_json::Value {
+    fn apply_schema_defaults(base: serde_json::Value, schema: &CreateSchema) -> serde_json::Value {
         let mut map = match base {
             serde_json::Value::Object(m) => m,
             other => return other,
@@ -134,11 +129,7 @@ impl SwitchboardClient {
         serde_json::Value::Object(map)
     }
 
-    pub async fn create_issue(
-        &self,
-        title: &str,
-        status: &str,
-    ) -> anyhow::Result<IssueResponse> {
+    pub async fn create_issue(&self, title: &str, status: &str) -> anyhow::Result<IssueResponse> {
         let url = format!("{}/api/v1/issues", self.base_url);
         let mut body = serde_json::json!({ "title": title, "status": status });
         if let Some(schema) = self.get_schema("issues").await {
@@ -151,7 +142,10 @@ impl SwitchboardClient {
             anyhow::bail!("Switchboard create_issue error ({}): {}", status, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] create_issue raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] create_issue raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("create_issue deserialize error: {}", e))
     }
@@ -169,11 +163,7 @@ impl SwitchboardClient {
         if !resp.status().is_success() {
             let code = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Switchboard transition_issue error ({}): {}",
-                code,
-                text
-            );
+            anyhow::bail!("Switchboard transition_issue error ({}): {}", code, text);
         }
         Ok(resp.json().await?)
     }
@@ -191,7 +181,10 @@ impl SwitchboardClient {
             anyhow::bail!("Switchboard create_channel error ({}): {}", status, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] create_channel raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] create_channel raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("create_channel deserialize error: {}", e))
     }
@@ -218,7 +211,10 @@ impl SwitchboardClient {
         author: &str,
     ) -> anyhow::Result<ThreadResponse> {
         let url = format!("{}/api/v1/channels/{}/threads", self.base_url, channel_id);
-        println!("[trace] create_thread: POST {} (channel_id={}, title={:?})", url, channel_id, title);
+        println!(
+            "[trace] create_thread: POST {} (channel_id={}, title={:?})",
+            url, channel_id, title
+        );
         let mut body = serde_json::json!({ "title": title, "author": author });
         if let Some(schema) = self.get_schema("threads").await {
             body = Self::apply_schema_defaults(body, &schema);
@@ -230,7 +226,10 @@ impl SwitchboardClient {
             anyhow::bail!("Switchboard create_thread error ({}): {}", status, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] create_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] create_thread raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         let thread: ThreadResponse = serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("create_thread deserialize error: {}", e))?;
         println!("[trace] create_thread: returned thread_id={}", thread.id);
@@ -259,27 +258,23 @@ impl SwitchboardClient {
             anyhow::bail!("Switchboard post_to_thread error ({}): {}", status, text);
         }
         let bytes = resp.bytes().await?;
-        eprintln!("[trace] post_to_thread raw response: {}", String::from_utf8_lossy(&bytes));
+        eprintln!(
+            "[trace] post_to_thread raw response: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         let post: PostResponse = serde_json::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("post_to_thread deserialize error: {}", e))?;
         println!("[trace] post_to_thread: returned post_id={}", post.id);
         Ok(post)
     }
 
-    pub async fn list_thread_posts(
-        &self,
-        thread_id: &str,
-    ) -> anyhow::Result<Vec<PostResponse>> {
+    pub async fn list_thread_posts(&self, thread_id: &str) -> anyhow::Result<Vec<PostResponse>> {
         let url = format!("{}/api/v1/threads/{}/posts", self.base_url, thread_id);
         let resp = self.http.get(&url).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Switchboard list_thread_posts error ({}): {}",
-                status,
-                text
-            );
+            anyhow::bail!("Switchboard list_thread_posts error ({}): {}", status, text);
         }
         Ok(resp.json().await?)
     }
