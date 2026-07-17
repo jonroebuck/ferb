@@ -1,53 +1,18 @@
 use async_trait::async_trait;
-use ferb_agent_core::{FerbAgent, SwitchboardClient, Uuid};
+use ferb_agent_core::{FerbAgent, SwitchboardClient};
 use ferb_core::TramwayClient;
 
 pub struct MessageAdmin {
-    sb: SwitchboardClient,
-    tramway: TramwayClient,
+    _sb: SwitchboardClient,
+    _tramway: TramwayClient,
 }
 
 impl MessageAdmin {
     pub fn new(switchboard_url: &str, tramway_url: &str, model: &str) -> Self {
         Self {
-            sb: SwitchboardClient::new(switchboard_url),
-            tramway: TramwayClient::new(tramway_url, model),
+            _sb: SwitchboardClient::new(switchboard_url),
+            _tramway: TramwayClient::new(tramway_url, model),
         }
-    }
-
-    pub async fn process_thread_messages(
-        &self,
-        thread_id: Uuid,
-        card_id: Uuid,
-    ) -> anyhow::Result<String> {
-        let posts = self.sb.list_posts(thread_id).await?;
-        if posts.is_empty() {
-            return Ok("no_action".to_string());
-        }
-
-        let latest = &posts[posts.len() - 1];
-        let prompt = format!(
-            "Interpret this agent message and decide what kanban action to take.\n\
-             Possible actions: transition_status, post_comment, no_action\n\
-             Message: {}",
-            latest.content
-        );
-
-        let response = self
-            .tramway
-            .complete(
-                "You are a message admin that interprets agent messages \
-                 and decides kanban board actions. Respond with the action name only.",
-                &prompt,
-            )
-            .await?;
-
-        let action = response.trim().to_lowercase();
-        if action.contains("transition") || action.contains("done") {
-            self.sb.update_issue_status(card_id, "done").await.ok();
-        }
-
-        Ok(action)
     }
 }
 
