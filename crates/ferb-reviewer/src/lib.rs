@@ -56,8 +56,6 @@ struct KanbanUpdate {
     pub comment: Option<String>,
 }
 
-pub struct Reviewer;
-
 fn extract_content(value: serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s,
@@ -194,7 +192,7 @@ impl Reviewer {
                 if let serde_json::Value::Object(map) = artifacts {
                     for (key, value) in map {
                         match value {
-                            serde_json::Value::Object(obj) => {
+                            serde_json::Value::Object(ref obj) => {
                                 let content = obj
                                     .get("content")
                                     .or_else(|| obj.get("body"))

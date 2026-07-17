@@ -168,13 +168,14 @@ async fn run_define_goal_card(
 
     // Post the confirmed goal JSON to each output thread.
     if let Some(artifact) = state.get_artifact("define-goal") {
-        let content = serde_json::to_string_pretty(artifact).unwrap_or_default();
-        if let Some(refined) = artifact.get("refined_goal").and_then(|v| v.as_str()) {
-            run_state.confirmed_goal = Some(refined.to_string());
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&artifact) {
+            if let Some(refined) = val.get("refined_goal").and_then(|v| v.as_str()) {
+                run_state.confirmed_goal = Some(refined.to_string());
+            }
         }
         for output_name in outputs {
             if let Some(&tid) = run_state.output_threads.get(output_name) {
-                if let Err(e) = sb.post_to_thread(tid, "ferb-reviewer", &content).await {
+                if let Err(e) = sb.post_to_thread(tid, "ferb-reviewer", &artifact).await {
                     eprintln!("[warn] Failed to post goal to '{}' thread: {}", output_name, e);
                 }
             }
@@ -453,10 +454,7 @@ fn write_artifact_to_disk(
         Some(v) => v,
         None => return,
     };
-    let raw = match artifact {
-        serde_json::Value::String(s) => s.clone(),
-        other => serde_json::to_string_pretty(other).unwrap_or_default(),
-    };
+    let raw = artifact;
     if raw.trim().is_empty() {
         return;
     }
@@ -712,7 +710,7 @@ async fn run_define_goal_phase(
         Some(ids) => ids,
         None => {
             // Switchboard unavailable — store the raw goal and continue.
-            store_raw_goal(state, goal);
+            store_raw_goal(state, goal)?;
             return Ok(());
         }
     };
@@ -818,15 +816,17 @@ async fn setup_define_goal_channel(
     Some((channel_id_str, thread_id_str))
 }
 
-fn store_raw_goal(state: &mut FerbState, goal: &str) {
+fn store_raw_goal(state: &mut FerbState, goal: &str) -> anyhow::Result<()> {
     state.set_artifact(
         "define-goal",
-        serde_json::json!({ "original_task": goal, "refined_goal": goal }),
-    );
-    state.set_artifact("confirmed-goal", serde_json::Value::String(goal.to_string()));
+        None,
+        serde_json::json!({ "original_task": goal, "refined_goal": goal }).to_string(),
+    )?;
+    state.set_artifact("confirmed-goal", None, goal)?;
     if let Some(t) = state.kanban_board.get_task_mut("define-goal") {
         t.status = TaskStatus::Done;
     }
+    Ok(())
 }
 
 /// Show a refined-goal summary and ask the user to confirm or reject it.
@@ -861,16 +861,18 @@ async fn handle_summary_confirmation(
 
         state.set_artifact(
             "define-goal",
+            None,
             serde_json::json!({
                 "original_task": original_goal,
                 "refined_goal": refined_content,
-            }),
-        );
+            }).to_string(),
+        )?;
 
         state.set_artifact(
             "confirmed-goal",
-            serde_json::Value::String(refined_content.to_string()),
-        );
+            None,
+            refined_content,
+        )?;
         println!(
             "[trace] stored confirmed-goal artifact: {} chars",
             refined_content.len()
@@ -1192,10 +1194,8 @@ pub async fn run_task(
     if state.kanban_board.get_task("define-goal").is_some() {
         println!("=== Define Goal ===\n");
         run_define_goal_phase(&mut state, &sb, &reviewer, goal).await?;
-        if let Some(map) = state.artifacts.as_object() {
-            let keys: Vec<&str> = map.keys().map(String::as_str).collect();
-            println!("[trace] FerbState artifacts after define-goal: {:?}", keys);
-        }
+        let keys: Vec<&str> = state.artifacts.keys().map(String::as_str).collect();
+        println!("[trace] FerbState artifacts after define-goal: {:?}", keys);
     } else {
         // Legacy seed: no define-goal task, seed the goal via message channel.
         state.send_message("user", "ferb-reviewer", "define-goal", goal);
@@ -1296,13 +1296,14 @@ mod tests {
             }],
         };
         let mut state = FerbState::new(board);
-        store_raw_goal(&mut state, "Build a calculator");
+        store_raw_goal(&mut state, "Build a calculator").unwrap();
 
         assert_eq!(
             state.kanban_board.get_task("define-goal").unwrap().status,
             TaskStatus::Done
         );
         let artifact = state.get_artifact("define-goal").unwrap();
-        assert_eq!(artifact["original_task"], "Build a calculator");
+        let artifact_val: serde_json::Value = serde_json::from_str(&artifact).unwrap();
+        assert_eq!(artifact_val["original_task"], "Build a calculator");
     }
 }
