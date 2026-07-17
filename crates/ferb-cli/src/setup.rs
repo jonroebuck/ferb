@@ -5,22 +5,22 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const BUNDLED_COMPOSE: &str = include_str!("../docker-compose.yml");
-const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../../../workflows/default.yaml");
-const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../../../workflows/web-development.yaml");
+const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../workflows/default.yaml");
+const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../workflows/web-development.yaml");
 
 const BUNDLED_PROMPTS: &[(&str, &str)] = &[
-    ("analyst.md",               include_str!("../../../prompts/analyst.md")),
-    ("artifact-reviewer.md",     include_str!("../../../prompts/artifact-reviewer.md")),
-    ("create-artifact.md",       include_str!("../../../prompts/create-artifact.md")),
-    ("define-goal-reviewer.md",  include_str!("../../../prompts/define-goal-reviewer.md")),
-    ("develop-plan.md",          include_str!("../../../prompts/develop-plan.md")),
-    ("goal-reviewer.md",         include_str!("../../../prompts/goal-reviewer.md")),
-    ("maker-data.md",            include_str!("../../../prompts/maker-data.md")),
-    ("maker.md",                 include_str!("../../../prompts/maker.md")),
-    ("plan-reviewer.md",         include_str!("../../../prompts/plan-reviewer.md")),
-    ("planner.md",               include_str!("../../../prompts/planner.md")),
-    ("test-planner.md",          include_str!("../../../prompts/test-planner.md")),
-    ("test-reviewer.md",         include_str!("../../../prompts/test-reviewer.md")),
+    ("analyst.md",               include_str!("../prompts/analyst.md")),
+    ("artifact-reviewer.md",     include_str!("../prompts/artifact-reviewer.md")),
+    ("create-artifact.md",       include_str!("../prompts/create-artifact.md")),
+    ("define-goal-reviewer.md",  include_str!("../prompts/define-goal-reviewer.md")),
+    ("develop-plan.md",          include_str!("../prompts/develop-plan.md")),
+    ("goal-reviewer.md",         include_str!("../prompts/goal-reviewer.md")),
+    ("maker-data.md",            include_str!("../prompts/maker-data.md")),
+    ("maker.md",                 include_str!("../prompts/maker.md")),
+    ("plan-reviewer.md",         include_str!("../prompts/plan-reviewer.md")),
+    ("planner.md",               include_str!("../prompts/planner.md")),
+    ("test-planner.md",          include_str!("../prompts/test-planner.md")),
+    ("test-reviewer.md",         include_str!("../prompts/test-reviewer.md")),
 ];
 
 const SECRET_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
