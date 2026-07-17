@@ -9,7 +9,6 @@ members = [
     "crates/ferb-reviewer",
     "crates/ferb-worker",
     "crates/ferb-kanban-manager",
-    "crates/ferb-message-admin",
     "crates/ferb-cli",
 ]
 resolver = "2"
