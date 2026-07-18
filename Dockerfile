@@ -8,6 +8,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY workflows/ workflows/
 COPY prompts/ prompts/
+COPY docker/ docker/
 
 RUN cargo build --release -p ferb-cli
 

@@ -5,6 +5,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const BUNDLED_COMPOSE: &str = include_str!("../docker-compose.yml");
+const BUNDLED_SANDBOX_DOCKERFILE: &str = include_str!("../../../docker/sandbox/Dockerfile");
 const BUNDLED_DEFAULT_WORKFLOW: &str = include_str!("../../../workflows/default.yaml");
 const BUNDLED_WEB_DEV_WORKFLOW: &str = include_str!("../../../workflows/web-development.yaml");
 
@@ -197,6 +198,28 @@ fn ensure_compose_file(ferb_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_sandbox_dockerfile(ferb_dir: &Path) -> anyhow::Result<()> {
+    let sandbox_dir = ferb_dir.join("docker").join("sandbox");
+    std::fs::create_dir_all(&sandbox_dir)?;
+    let dockerfile_path = sandbox_dir.join("Dockerfile");
+    if !dockerfile_path.exists() {
+        std::fs::write(&dockerfile_path, BUNDLED_SANDBOX_DOCKERFILE)?;
+    }
+    Ok(())
+}
+
+fn build_sandbox_image(ferb_dir: &Path) -> anyhow::Result<()> {
+    let sandbox_dir = ferb_dir.join("docker").join("sandbox");
+    let status = Command::new("docker")
+        .args(["build", "-t", "ferb-sandbox:latest"])
+        .arg(&sandbox_dir)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("docker build ferb-sandbox failed");
+    }
+    Ok(())
+}
+
 fn ensure_prompts(ferb_dir: &Path) -> anyhow::Result<()> {
     let prompts_dir = ferb_dir.join("prompts");
     std::fs::create_dir_all(&prompts_dir)?;
@@ -245,6 +268,7 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     std::fs::create_dir_all(ferb_dir.join("secrets"))?;
 
     ensure_compose_file(ferb_dir)?;
+    ensure_sandbox_dockerfile(ferb_dir)?;
     ensure_workflows(ferb_dir)?;
     ensure_prompts(ferb_dir)?;
 
@@ -287,6 +311,8 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     if !no_pull {
         println!("[info] Pulling latest images...");
         docker_compose_pull(ferb_dir)?;
+        println!("[info] Building sandbox image...");
+        build_sandbox_image(ferb_dir)?;
     }
     println!("[info] Starting services...");
     docker_compose_up(ferb_dir)?;
@@ -303,12 +329,15 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
 fn cmd_up_ci(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     check_docker()?;
     ensure_compose_file(ferb_dir)?;
+    ensure_sandbox_dockerfile(ferb_dir)?;
     ensure_workflows(ferb_dir)?;
     ensure_prompts(ferb_dir)?;
 
     if !no_pull {
         println!("[info] Pulling latest images...");
         docker_compose_pull(ferb_dir)?;
+        println!("[info] Building sandbox image...");
+        build_sandbox_image(ferb_dir)?;
     }
     println!("[info] Starting services...");
     docker_compose_up(ferb_dir)?;
