@@ -277,6 +277,7 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     if !toml_path.exists() {
         let switchboard_url = prompt("Switchboard URL", "http://localhost:4080")?;
         let tramway_url = prompt("Tramway URL", "http://localhost:8080")?;
+        let agent_runner_url = prompt("Agent Runner URL", "http://localhost:3000")?;
 
         let default_wf = ferb_dir
             .join("workflows")
@@ -292,6 +293,9 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
                 url: tramway_url,
                 model: "claude/claude-sonnet-4-6".to_string(),
                 max_tokens: 16384,
+            },
+            agent_runner: crate::AgentRunnerToml {
+                url: agent_runner_url,
             },
             workflow: crate::WorkflowToml {
                 default: default_wf,
@@ -311,6 +315,7 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     if !no_pull {
         println!("[info] Pulling latest images...");
         docker_compose_pull(ferb_dir)?;
+        // Sandbox image must be built before compose up so agent-runner can use it.
         println!("[info] Building sandbox image...");
         build_sandbox_image(ferb_dir)?;
     }
@@ -321,7 +326,8 @@ fn cmd_up_interactive(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
 
     let config = crate::load_config()?;
     println!("\nFerb is ready!");
-    println!("Switchboard: {}", config.switchboard.url);
+    println!("Switchboard:   {}", config.switchboard.url);
+    println!("Agent Runner:  {}", config.agent_runner.url);
 
     Ok(())
 }
@@ -336,6 +342,7 @@ fn cmd_up_ci(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
     if !no_pull {
         println!("[info] Pulling latest images...");
         docker_compose_pull(ferb_dir)?;
+        // Sandbox image must be built before compose up so agent-runner can use it.
         println!("[info] Building sandbox image...");
         build_sandbox_image(ferb_dir)?;
     }
@@ -346,8 +353,11 @@ fn cmd_up_ci(ferb_dir: &Path, no_pull: bool) -> anyhow::Result<()> {
 
     let switchboard_url =
         std::env::var("SWITCHBOARD_URL").unwrap_or_else(|_| "http://localhost:4080".to_string());
+    let agent_runner_url =
+        std::env::var("AGENT_RUNNER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
     println!("\nFerb is ready!");
-    println!("Switchboard: {}", switchboard_url);
+    println!("Switchboard:   {}", switchboard_url);
+    println!("Agent Runner:  {}", agent_runner_url);
 
     Ok(())
 }
@@ -394,6 +404,7 @@ pub fn cmd_status() -> anyhow::Result<()> {
     println!("  Server port:     {}", config.server.port);
     println!("  Switchboard URL: {}", config.switchboard.url);
     println!("  Tramway URL:     {}", config.tramway.url);
+    println!("  Agent Runner:    {}", config.agent_runner.url);
     println!();
 
     let compose_path = ferb_dir.join("docker-compose.yml");

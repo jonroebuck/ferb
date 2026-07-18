@@ -25,6 +25,16 @@ services:
     depends_on:
       - klondike
 
+  agent-runner:
+    image: ghcr.io/jonroebuck/agent-runner:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - LLM_BASE_URL=http://tramway:8080
+      - SANDBOX_IMAGE=ferb-sandbox:latest
+    depends_on:
+      - tramway
+
   ferb:
     image: ghcr.io/jonroebuck/ferb:latest
     ports:
@@ -32,9 +42,11 @@ services:
     environment:
       - SWITCHBOARD_URL=http://switchboard:4080
       - TRAMWAY_URL=http://tramway:8080
+      - AGENT_RUNNER_URL=http://agent-runner:3000
     depends_on:
       - switchboard
       - tramway
+      - agent-runner
 
 volumes:
   klondike-data:

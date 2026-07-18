@@ -51,6 +51,7 @@ pub(crate) struct FerbConfig {
     pub server: ServerConfig,
     pub switchboard: SwitchboardConfig,
     pub tramway: TramwayConfig,
+    pub agent_runner: AgentRunnerConfig,
     pub workflow: WorkflowConfig,
 }
 
@@ -61,6 +62,11 @@ pub(crate) struct ServerConfig {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct SwitchboardConfig {
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AgentRunnerConfig {
     pub url: String,
 }
 
@@ -81,6 +87,7 @@ pub(crate) struct FerbToml {
     pub server: ServerToml,
     pub switchboard: SwitchboardToml,
     pub tramway: TramwayToml,
+    pub agent_runner: AgentRunnerToml,
     pub workflow: WorkflowToml,
 }
 
@@ -91,6 +98,11 @@ pub(crate) struct ServerToml {
 
 #[derive(Serialize)]
 pub(crate) struct SwitchboardToml {
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct AgentRunnerToml {
     pub url: String,
 }
 
@@ -125,11 +137,13 @@ pub(crate) fn load_config() -> anyhow::Result<FerbConfig> {
         .set_default("tramway.url", "http://localhost:8080")?
         .set_default("tramway.model", "claude/claude-sonnet-4-6")?
         .set_default("tramway.max_tokens", 16384)?
+        .set_default("agent_runner.url", "http://localhost:3000")?
         .set_default("workflow.default", default_workflow)?
         .add_source(config::File::from(ferb_dir().join("ferb.toml")).required(false))
         .set_override_option("switchboard.url", std::env::var("SWITCHBOARD_URL").ok())?
         .set_override_option("tramway.url", std::env::var("TRAMWAY_URL").ok())?
         .set_override_option("tramway.model", std::env::var("FERB_MODEL").ok())?
+        .set_override_option("agent_runner.url", std::env::var("AGENT_RUNNER_URL").ok())?
         .build()?;
 
     Ok(cfg.try_deserialize()?)
